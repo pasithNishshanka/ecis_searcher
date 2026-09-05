@@ -15,6 +15,8 @@ const medicalDeviceRoutes = require("./routes/medicalDevice.routes");
 const wardRoutes = require("./routes/ward.routes");
 const admissionRoutes = require("./routes/admission.routes");
 const clinicRoutes = require("./routes/clinic.routes");
+const emergencyRoutes = require("./routes/emergency.routes");
+const ecisRoutes = require("./routes/ecis.routes");
 const errorHandler = require("./middleware/error.middleware");
 
 const app = express();
@@ -62,6 +64,10 @@ app.use("/api/wards", wardRoutes);
 app.use("/api/admissions", admissionRoutes);
 
 app.use("/api/clinics", clinicRoutes);
+
+app.use("/api/emergency", emergencyRoutes);
+
+app.use("/api/ecis", ecisRoutes);
 
 app.use(errorHandler);
 
