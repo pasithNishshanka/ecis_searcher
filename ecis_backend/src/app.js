@@ -7,9 +7,14 @@ const treatmentRoutes = require("./routes/treatment.routes");
 const clinicalObservationRoutes = require("./routes/clinicalObservation.routes");
 const investigationRoutes = require("./routes/investigation.routes");
 const conditionRoutes = require("./routes/condition.routes");
-const surgeryRoutes = require('./routes/surgery.routes');
-const procedureRoutes = require('./routes/procedure.routes');
-const fractureRoutes = require('./routes/fracture.routes');
+const surgeryRoutes = require("./routes/surgery.routes");
+const procedureRoutes = require("./routes/procedure.routes");
+const fractureRoutes = require("./routes/fracture.routes");
+const dentalRecordRoutes = require("./routes/dentalRecord.routes");
+const medicalDeviceRoutes = require("./routes/medicalDevice.routes");
+const wardRoutes = require("./routes/ward.routes");
+const admissionRoutes = require("./routes/admission.routes");
+const clinicRoutes = require("./routes/clinic.routes");
 const errorHandler = require("./middleware/error.middleware");
 
 const app = express();
@@ -42,11 +47,21 @@ app.use("/api/investigations", investigationRoutes);
 
 app.use("/api/conditions", conditionRoutes);
 
-app.use('/api/surgeries', surgeryRoutes);
+app.use("/api/surgeries", surgeryRoutes);
 
-app.use('/api/procedures', procedureRoutes);
+app.use("/api/procedures", procedureRoutes);
 
-app.use('/api/fractures', fractureRoutes);
+app.use("/api/fractures", fractureRoutes);
+
+app.use("/api/dental-records", dentalRecordRoutes);
+
+app.use("/api/medical-devices", medicalDeviceRoutes);
+
+app.use("/api/wards", wardRoutes);
+
+app.use("/api/admissions", admissionRoutes);
+
+app.use("/api/clinics", clinicRoutes);
 
 app.use(errorHandler);
 
