@@ -1,0 +1,40 @@
+@import "tailwindcss";
+
+:root {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #0f172a;
+  background: #f4f8f8;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; background: #f4f8f8; }
+button, input, select, textarea { font: inherit; }
+button { cursor: pointer; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 99px; }
+
+@layer components {
+  .btn-primary { @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold text-white shadow-sm transition disabled:cursor-not-allowed disabled:opacity-50; background:var(--ecis-primary); } .btn-primary:hover:not(:disabled){background:var(--ecis-primary-hover)}
+  .btn-secondary { @apply inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 transition hover:border-teal-200 hover:bg-teal-50 hover:text-teal-800; }
+  .btn-danger { @apply inline-flex items-center justify-center gap-2 rounded-xl border border-red-200 bg-white px-4 py-2.5 text-sm font-bold text-red-700 hover:bg-red-50; }
+  .field { @apply w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-800 outline-none transition placeholder:text-slate-400; border-radius:var(--ecis-field-radius); min-height:var(--ecis-control-height); } .field:focus{border-color:var(--ecis-primary);box-shadow:0 0 0 4px #f0fdfa}
+  .label { @apply mb-1.5 block text-xs font-bold text-slate-600; }
+  .card { @apply rounded-2xl border border-slate-200 bg-white shadow-sm; }
+  .badge { @apply inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-600; }
+  .section-title { @apply text-lg font-extrabold text-slate-900; }
+  .muted { @apply text-sm text-slate-500; }
+  .avatar { @apply grid size-11 shrink-0 place-items-center rounded-full bg-teal-100 text-sm font-extrabold text-teal-800; }
+}
+
+@layer components {
+  .section-marker { @apply grid size-7 shrink-0 place-items-center rounded-lg bg-teal-50 text-xs font-black text-teal-700; }
+}
+
+/* Design tokens: change these values once during reviews/viva to update the whole UI. */
+:root{--ecis-primary:#0f766e;--ecis-primary-hover:#115e59;--ecis-accent:#ccfbf1;--ecis-field-radius:.75rem;--ecis-control-height:40px;--ecis-card-radius:1rem}
+.base-field{width:100%;min-height:var(--ecis-control-height);border:1px solid #cbd5e1;border-radius:var(--ecis-field-radius);background:white;padding:.625rem .75rem;font-size:.8125rem;color:#1e293b;outline:none;transition:border-color .15s,box-shadow .15s}
+.base-field::placeholder{color:#94a3b8}.base-field:focus{border-color:var(--ecis-primary);box-shadow:0 0 0 4px #f0fdfa}.base-field:disabled{background:#f8fafc;cursor:not-allowed}
+.base-textarea{min-height:90px;resize:vertical}
+.form-field__label{display:block;margin-bottom:.375rem;font-size:.75rem;font-weight:700;color:#475569}.form-field__required{margin-left:.2rem;color:#dc2626}.form-field__hint{margin:.3rem 0 0;font-size:.6875rem;color:#94a3b8}.form-field__error{margin:.3rem 0 0;font-size:.6875rem;color:#dc2626}
+.card{border-radius:var(--ecis-card-radius)}
