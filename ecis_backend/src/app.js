@@ -19,6 +19,7 @@ const emergencyRoutes = require("./routes/emergency.routes");
 const ecisRoutes = require("./routes/ecis.routes");
 const ecisReviewRoutes = require("./routes/ecisReview.routes");
 const ecisConfirmationRoutes = require("./routes/ecisConfirmation.routes");
+const authRoutes = require("./routes/auth.routes");
 const errorHandler = require("./middleware/error.middleware");
 
 const app = express();
@@ -74,6 +75,8 @@ app.use("/api/ecis", ecisRoutes);
 app.use("/api/ecis", ecisReviewRoutes);
 
 app.use("/api/ecis", ecisConfirmationRoutes);
+
+app.use("/api/auth", authRoutes);
 
 app.use(errorHandler);
 

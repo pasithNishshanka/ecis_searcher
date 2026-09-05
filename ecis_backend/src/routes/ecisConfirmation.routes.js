@@ -4,8 +4,25 @@ const router = express.Router();
 
 const {
   confirmIdentity,
-} = require("../controllers/ecisConfirmation.controller");
+} = require(
+  "../controllers/ecisConfirmation.controller",
+);
 
-router.post("/confirm", confirmIdentity);
+const {
+  authenticate,
+} = require("../middleware/auth.middleware");
+
+const {
+  authorizeRoles,
+} = require(
+  "../middleware/authorization.middleware",
+);
+
+router.post(
+  "/confirm",
+  authenticate,
+  authorizeRoles("DOCTOR"),
+  confirmIdentity,
+);
 
 module.exports = router;

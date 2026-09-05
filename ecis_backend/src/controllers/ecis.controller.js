@@ -1,71 +1,174 @@
 const ecisService = require("../services/ecis.service");
 const pool = require("../config/database");
 
-const searchECISCandidates = async (req, res) => {
+const searchECISCandidates = async (
+  req,
+  res,
+) => {
   try {
     const criteria = req.body || {};
 
-    /*
-     * These values will eventually come from the
-     * authenticated user/session.
-     *
-     * For the current development stage we use
-     * request headers / body when available.
-     */
-    const emergencyCaseId = criteria.emergencyCaseId || null;
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        message:
+          "Authenticated user information is required",
+      });
+    }
 
-    const searchedBy = criteria.searchedBy || null;
+    const emergencyCaseId =
+      criteria.emergencyCaseId;
+
+    if (!emergencyCaseId) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "emergencyCaseId is required for ECIS search",
+      });
+    }
 
     /*
-     * Do not store audit/helper fields as search criteria.
+     * -------------------------------------------------------
+     * 1. Get emergency case
+     * -------------------------------------------------------
      */
+
+    const emergencyCaseResult =
+      await pool.query(
+        `
+        SELECT
+          emergency_case_id,
+          hospital_id,
+          patient_id,
+          case_number,
+          unidentified_patient,
+          status
+        FROM public.emergency_cases
+        WHERE emergency_case_id = $1
+        LIMIT 1
+        `,
+        [emergencyCaseId],
+      );
+
+    if (
+      emergencyCaseResult.rows.length === 0
+    ) {
+      return res.status(404).json({
+        success: false,
+        message:
+          "Emergency case not found",
+      });
+    }
+
+    const emergencyCase =
+      emergencyCaseResult.rows[0];
+
+    /*
+     * -------------------------------------------------------
+     * 2. Hospital-level authorization
+     * -------------------------------------------------------
+     */
+
+    if (
+      Number(emergencyCase.hospital_id) !==
+      Number(req.user.hospitalId)
+    ) {
+      return res.status(403).json({
+        success: false,
+        message:
+          "You do not have access to this emergency case",
+      });
+    }
+
+    /*
+     * -------------------------------------------------------
+     * 3. ECIS should normally be used while the identity
+     *    is still unresolved.
+     * -------------------------------------------------------
+     */
+
+    if (!emergencyCase.unidentified_patient) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "ECIS search is only available for unidentified emergency cases",
+      });
+    }
+
+    /*
+     * -------------------------------------------------------
+     * 4. Remove operational field from search criteria
+     * -------------------------------------------------------
+     */
+
     const {
       emergencyCaseId: _emergencyCaseId,
-      searchedBy: _searchedBy,
       ...searchCriteria
     } = criteria;
 
-    const candidates = await ecisService.searchCandidates(searchCriteria);
+    /*
+     * -------------------------------------------------------
+     * 5. Search only within the authenticated user's hospital
+     * -------------------------------------------------------
+     */
+
+    const candidates =
+      await ecisService.searchCandidates(
+        searchCriteria,
+        req.user.hospitalId,
+      );
 
     /*
-     * Only create a search log when we have a valid
-     * hospital user ID.
-     *
-     * During the current development phase, searchedBy
-     * can be supplied in the request body.
+     * -------------------------------------------------------
+     * 6. Record search audit log
+     * -------------------------------------------------------
      */
-    if (searchedBy) {
-      await pool.query(
-        `
-                INSERT INTO ecis_search_logs (
-                    emergency_case_id,
-                    searched_by,
-                    search_criteria,
-                    result_count
-                )
-                VALUES ($1, $2, $3, $4)
-                `,
-        [
-          emergencyCaseId,
-          searchedBy,
-          JSON.stringify(searchCriteria),
-          candidates.length,
-        ],
-      );
-    }
+
+    await pool.query(
+      `
+      INSERT INTO public.ecis_search_logs (
+        emergency_case_id,
+        searched_by,
+        search_criteria,
+        result_count
+      )
+      VALUES ($1, $2, $3, $4)
+      `,
+      [
+        emergencyCaseId,
+        req.user.userId,
+        JSON.stringify(searchCriteria),
+        candidates.length,
+      ],
+    );
 
     return res.status(200).json({
       success: true,
-      message: "ECIS candidate search completed successfully",
+      message:
+        "ECIS candidate search completed successfully",
+      emergencyCase: {
+        emergencyCaseId:
+          emergencyCase.emergency_case_id,
+        caseNumber:
+          emergencyCase.case_number,
+        hospitalId:
+          emergencyCase.hospital_id,
+        status:
+          emergencyCase.status,
+      },
       resultCount: candidates.length,
       candidates,
     });
   } catch (error) {
-    console.error("ECIS search error:", error);
+    console.error(
+      "ECIS search error:",
+      error,
+    );
 
     return res.status(500).json({
       success: false,
-      message: "Failed to perform ECIS candidate search",
+      message:
+        "Failed to perform ECIS candidate search",
       error: error.message,
     });
   }

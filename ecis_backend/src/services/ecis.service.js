@@ -3,11 +3,13 @@ const pool = require("../config/database");
 /*
  * ECIS Candidate Matching Service
  *
- * Important:
- * ECIS does not create a duplicate identity database.
- * It searches the existing EHR and ranks possible patients.
+ * ECIS searches the existing longitudinal EHR.
  *
- * The score is a prototype, explainable heuristic for research.
+ * Security rule:
+ * Candidate patients are restricted to the hospital
+ * associated with the authenticated emergency case.
+ *
+ * The score is an explainable heuristic for research.
  * It is NOT a medically validated probability of identity.
  */
 
@@ -42,7 +44,9 @@ const containsValue = (value, searchValue) => {
     return false;
   }
 
-  return normalize(value).includes(normalize(searchValue));
+  return normalize(value).includes(
+    normalize(searchValue),
+  );
 };
 
 const calculateAge = (dateOfBirth) => {
@@ -53,13 +57,20 @@ const calculateAge = (dateOfBirth) => {
   const today = new Date();
   const dob = new Date(dateOfBirth);
 
-  let age = today.getFullYear() - dob.getFullYear();
+  let age =
+    today.getFullYear() -
+    dob.getFullYear();
 
-  const monthDifference = today.getMonth() - dob.getMonth();
+  const monthDifference =
+    today.getMonth() -
+    dob.getMonth();
 
   if (
     monthDifference < 0 ||
-    (monthDifference === 0 && today.getDate() < dob.getDate())
+    (
+      monthDifference === 0 &&
+      today.getDate() < dob.getDate()
+    )
   ) {
     age--;
   }
@@ -68,9 +79,16 @@ const calculateAge = (dateOfBirth) => {
 };
 
 const isNumberProvided = (value) =>
-  value !== undefined && value !== null && value !== "";
+  value !== undefined &&
+  value !== null &&
+  value !== "";
 
-const addEvidence = (evidence, type, description, sourceTable) => {
+const addEvidence = (
+  evidence,
+  type,
+  description,
+  sourceTable,
+) => {
   evidence.push({
     type,
     description,
@@ -78,61 +96,69 @@ const addEvidence = (evidence, type, description, sourceTable) => {
   });
 };
 
-const searchCandidates = async (criteria = {}) => {
+const searchCandidates = async (
+  criteria = {},
+  hospitalId,
+) => {
+  if (!hospitalId) {
+    throw new Error(
+      "Hospital context is required for ECIS search",
+    );
+  }
+
   /*
    * ---------------------------------------------------------
-   * 1. RETRIEVE PATIENTS
+   * 1. RETRIEVE PATIENTS ONLY FROM USER'S HOSPITAL
    * ---------------------------------------------------------
-   *
-   * We intentionally start with the patient table.
-   * Clinical clues are evaluated afterward.
-   *
-   * LIMIT prevents an unnecessarily large response.
    */
 
   const patientQuery = `
-        SELECT
-            p.patient_id,
-            p.patient_number,
-            p.first_name,
-            p.middle_name,
-            p.last_name,
-            p.date_of_birth,
-            p.gender,
-            p.blood_group,
-            p.height_cm,
-            p.weight_kg,
-            p.nationality,
-            p.primary_phone,
-            p.secondary_phone,
-            p.occupation,
-            p.status,
-            p.hospital_id,
-            h.hospital_name
-        FROM patients p
-        LEFT JOIN hospitals h
-            ON h.hospital_id = p.hospital_id
-        WHERE p.status = 'ACTIVE'
-        ORDER BY p.patient_id DESC
-        LIMIT 1000
-    `;
+    SELECT
+      p.patient_id,
+      p.patient_number,
+      p.first_name,
+      p.middle_name,
+      p.last_name,
+      p.date_of_birth,
+      p.gender,
+      p.blood_group,
+      p.height_cm,
+      p.weight_kg,
+      p.nationality,
+      p.primary_phone,
+      p.secondary_phone,
+      p.occupation,
+      p.status,
+      p.hospital_id,
+      h.hospital_name
+    FROM public.patients p
+    LEFT JOIN public.hospitals h
+      ON h.hospital_id = p.hospital_id
+    WHERE p.status = 'ACTIVE'
+      AND p.hospital_id = $1
+    ORDER BY p.patient_id DESC
+    LIMIT 1000
+  `;
 
-  const patientResult = await pool.query(patientQuery);
+  const patientResult = await pool.query(
+    patientQuery,
+    [hospitalId],
+  );
 
   if (patientResult.rows.length === 0) {
     return [];
   }
 
+  const patientIds =
+    patientResult.rows.map(
+      (patient) => patient.patient_id,
+    );
+
   /*
    * ---------------------------------------------------------
    * 2. LOAD RELATED EHR DATA
    * ---------------------------------------------------------
-   *
-   * We retrieve the relevant records in separate queries
-   * rather than creating one huge multi-table JOIN.
    */
-
-  const patientIds = patientResult.rows.map((patient) => patient.patient_id);
 
   const [
     surgeriesResult,
@@ -145,111 +171,111 @@ const searchCandidates = async (criteria = {}) => {
   ] = await Promise.all([
     pool.query(
       `
-            SELECT
-                surgery_id,
-                patient_id,
-                surgery_name,
-                surgery_code,
-                body_site,
-                laterality,
-                preoperative_diagnosis,
-                surgery_date
-            FROM surgeries
-            WHERE patient_id = ANY($1::bigint[])
-            `,
+      SELECT
+        surgery_id,
+        patient_id,
+        surgery_name,
+        surgery_code,
+        body_site,
+        laterality,
+        preoperative_diagnosis,
+        surgery_date
+      FROM public.surgeries
+      WHERE patient_id = ANY($1::bigint[])
+      `,
       [patientIds],
     ),
 
     pool.query(
       `
-            SELECT
-                fracture_id,
-                patient_id,
-                body_part,
-                laterality,
-                fracture_type
-            FROM fractures
-            WHERE patient_id = ANY($1::bigint[])
-            `,
+      SELECT
+        fracture_id,
+        patient_id,
+        body_part,
+        laterality,
+        fracture_type
+      FROM public.fractures
+      WHERE patient_id = ANY($1::bigint[])
+      `,
       [patientIds],
     ),
 
     pool.query(
       `
-            SELECT
-                device_id,
-                patient_id,
-                device_type,
-                device_name,
-                manufacturer,
-                model_number,
-                serial_number,
-                body_site,
-                laterality,
-                implantation_date
-            FROM medical_devices
-            WHERE patient_id = ANY($1::bigint[])
-            `,
+      SELECT
+        device_id,
+        patient_id,
+        device_type,
+        device_name,
+        manufacturer,
+        model_number,
+        serial_number,
+        body_site,
+        laterality,
+        implantation_date
+      FROM public.medical_devices
+      WHERE patient_id = ANY($1::bigint[])
+      `,
       [patientIds],
     ),
 
     pool.query(
       `
-            SELECT
-                dental_record_id,
-                patient_id,
-                record_date,
-                tooth_number,
-                condition
-            FROM dental_records
-            WHERE patient_id = ANY($1::bigint[])
-            `,
+      SELECT
+        dental_record_id,
+        patient_id,
+        record_date,
+        tooth_number,
+        condition
+      FROM public.dental_records
+      WHERE patient_id = ANY($1::bigint[])
+      `,
       [patientIds],
     ),
 
     pool.query(
       `
-            SELECT
-                observation_id,
-                patient_id,
-                observation_type,
-                observation_value
-            FROM clinical_observations
-            WHERE patient_id = ANY($1::bigint[])
-            `,
+      SELECT
+        observation_id,
+        patient_id,
+        observation_type,
+        observation_value
+      FROM public.clinical_observations
+      WHERE patient_id = ANY($1::bigint[])
+      `,
       [patientIds],
     ),
 
     pool.query(
       `
-            SELECT
-                treatment_id,
-                patient_id,
-                treatment_type,
-                treatment_name,
-                description,
-                treatment_date
-            FROM treatment_records
-            WHERE patient_id = ANY($1::bigint[])
-            `,
+      SELECT
+        treatment_id,
+        patient_id,
+        treatment_type,
+        treatment_name,
+        description,
+        treatment_date
+      FROM public.treatment_records
+      WHERE patient_id = ANY($1::bigint[])
+      `,
       [patientIds],
     ),
 
     pool.query(
       `
-            SELECT
-                investigation_id,
-                patient_id,
-                investigation_type,
-                investigation_name,
-                result_summary,
-                result_value,
-                unit,
-                reference_range,
-                performed_date
-            FROM investigations
-            WHERE patient_id = ANY($1::bigint[])
-            `,
+      SELECT
+        investigation_id,
+        patient_id,
+        investigation_type,
+        investigation_name,
+        result_summary,
+        result_value,
+        unit,
+        reference_range,
+        performed_date
+      FROM public.investigations
+      WHERE patient_id = ANY($1::bigint[])
+      `,
       [patientIds],
     ),
   ]);
@@ -274,19 +300,26 @@ const searchCandidates = async (criteria = {}) => {
     return grouped;
   };
 
-  const surgeriesByPatient = groupByPatient(surgeriesResult.rows);
+  const surgeriesByPatient =
+    groupByPatient(surgeriesResult.rows);
 
-  const fracturesByPatient = groupByPatient(fracturesResult.rows);
+  const fracturesByPatient =
+    groupByPatient(fracturesResult.rows);
 
-  const devicesByPatient = groupByPatient(devicesResult.rows);
+  const devicesByPatient =
+    groupByPatient(devicesResult.rows);
 
-  const dentalByPatient = groupByPatient(dentalResult.rows);
+  const dentalByPatient =
+    groupByPatient(dentalResult.rows);
 
-  const observationsByPatient = groupByPatient(observationsResult.rows);
+  const observationsByPatient =
+    groupByPatient(observationsResult.rows);
 
-  const treatmentsByPatient = groupByPatient(treatmentsResult.rows);
+  const treatmentsByPatient =
+    groupByPatient(treatmentsResult.rows);
 
-  const investigationsByPatient = groupByPatient(investigationsResult.rows);
+  const investigationsByPatient =
+    groupByPatient(investigationsResult.rows);
 
   /*
    * ---------------------------------------------------------
@@ -302,14 +335,13 @@ const searchCandidates = async (criteria = {}) => {
     const evidence = [];
 
     /*
-     * -----------------------------------------------------
      * GENDER
-     * -----------------------------------------------------
      */
 
     if (
       criteria.gender &&
-      normalize(patient.gender) === normalize(criteria.gender)
+      normalize(patient.gender) ===
+        normalize(criteria.gender)
     ) {
       score += WEIGHTS.gender;
 
@@ -322,14 +354,13 @@ const searchCandidates = async (criteria = {}) => {
     }
 
     /*
-     * -----------------------------------------------------
      * BLOOD GROUP
-     * -----------------------------------------------------
      */
 
     if (
       criteria.bloodGroup &&
-      normalize(patient.blood_group) === normalize(criteria.bloodGroup)
+      normalize(patient.blood_group) ===
+        normalize(criteria.bloodGroup)
     ) {
       score += WEIGHTS.bloodGroup;
 
@@ -342,34 +373,17 @@ const searchCandidates = async (criteria = {}) => {
     }
 
     /*
-     * -----------------------------------------------------
      * AGE
-     * -----------------------------------------------------
      */
 
-    const patientAge = calculateAge(patient.date_of_birth);
-
-    let ageMatched = false;
-
-    if (
-      isNumberProvided(criteria.ageMin) &&
-      patientAge !== null &&
-      patientAge >= Number(criteria.ageMin)
-    ) {
-      ageMatched = true;
-    }
+    const patientAge =
+      calculateAge(patient.date_of_birth);
 
     if (
-      isNumberProvided(criteria.ageMax) &&
-      patientAge !== null &&
-      patientAge <= Number(criteria.ageMax)
-    ) {
-      ageMatched = true;
-    }
-
-    if (
-      (isNumberProvided(criteria.ageMin) ||
-        isNumberProvided(criteria.ageMax)) &&
+      (
+        isNumberProvided(criteria.ageMin) ||
+        isNumberProvided(criteria.ageMax)
+      ) &&
       patientAge !== null
     ) {
       const minPassed =
@@ -393,23 +407,25 @@ const searchCandidates = async (criteria = {}) => {
     }
 
     /*
-     * -----------------------------------------------------
      * HEIGHT
-     * -----------------------------------------------------
      */
 
     if (isNumberProvided(patient.height_cm)) {
       const minPassed =
         !isNumberProvided(criteria.heightMin) ||
-        Number(patient.height_cm) >= Number(criteria.heightMin);
+        Number(patient.height_cm) >=
+          Number(criteria.heightMin);
 
       const maxPassed =
         !isNumberProvided(criteria.heightMax) ||
-        Number(patient.height_cm) <= Number(criteria.heightMax);
+        Number(patient.height_cm) <=
+          Number(criteria.heightMax);
 
       if (
-        (isNumberProvided(criteria.heightMin) ||
-          isNumberProvided(criteria.heightMax)) &&
+        (
+          isNumberProvided(criteria.heightMin) ||
+          isNumberProvided(criteria.heightMax)
+        ) &&
         minPassed &&
         maxPassed
       ) {
@@ -425,23 +441,25 @@ const searchCandidates = async (criteria = {}) => {
     }
 
     /*
-     * -----------------------------------------------------
      * WEIGHT
-     * -----------------------------------------------------
      */
 
     if (isNumberProvided(patient.weight_kg)) {
       const minPassed =
         !isNumberProvided(criteria.weightMin) ||
-        Number(patient.weight_kg) >= Number(criteria.weightMin);
+        Number(patient.weight_kg) >=
+          Number(criteria.weightMin);
 
       const maxPassed =
         !isNumberProvided(criteria.weightMax) ||
-        Number(patient.weight_kg) <= Number(criteria.weightMax);
+        Number(patient.weight_kg) <=
+          Number(criteria.weightMax);
 
       if (
-        (isNumberProvided(criteria.weightMin) ||
-          isNumberProvided(criteria.weightMax)) &&
+        (
+          isNumberProvided(criteria.weightMin) ||
+          isNumberProvided(criteria.weightMax)
+        ) &&
         minPassed &&
         maxPassed
       ) {
@@ -457,52 +475,73 @@ const searchCandidates = async (criteria = {}) => {
     }
 
     /*
-     * -----------------------------------------------------
      * NAME
-     * -----------------------------------------------------
      */
 
     if (
       criteria.partialName &&
-      (containsValue(patient.first_name, criteria.partialName) ||
-        containsValue(patient.middle_name, criteria.partialName) ||
-        containsValue(patient.last_name, criteria.partialName))
+      (
+        containsValue(
+          patient.first_name,
+          criteria.partialName,
+        ) ||
+        containsValue(
+          patient.middle_name,
+          criteria.partialName,
+        ) ||
+        containsValue(
+          patient.last_name,
+          criteria.partialName,
+        )
+      )
     ) {
       score += WEIGHTS.name;
 
       addEvidence(
         evidence,
         "Name",
-        `Name clue matched patient name`,
+        "Name clue matched patient name",
         "patients",
       );
     }
 
     /*
-     * -----------------------------------------------------
      * PHONE
-     * -----------------------------------------------------
      */
 
     if (
       criteria.phoneFragment &&
-      (containsValue(patient.primary_phone, criteria.phoneFragment) ||
-        containsValue(patient.secondary_phone, criteria.phoneFragment))
+      (
+        containsValue(
+          patient.primary_phone,
+          criteria.phoneFragment,
+        ) ||
+        containsValue(
+          patient.secondary_phone,
+          criteria.phoneFragment,
+        )
+      )
     ) {
       score += WEIGHTS.phone;
 
-      addEvidence(evidence, "Phone", "Phone fragment matched", "patients");
+      addEvidence(
+        evidence,
+        "Phone",
+        "Phone fragment matched",
+        "patients",
+      );
     }
 
     /*
-     * -----------------------------------------------------
-     * OCCUPATION / WORKPLACE
-     * -----------------------------------------------------
+     * OCCUPATION
      */
 
     if (
       criteria.workplace &&
-      containsValue(patient.occupation, criteria.workplace)
+      containsValue(
+        patient.occupation,
+        criteria.workplace,
+      )
     ) {
       score += WEIGHTS.occupation;
 
@@ -515,24 +554,35 @@ const searchCandidates = async (criteria = {}) => {
     }
 
     /*
-     * -----------------------------------------------------
      * SURGERY
-     * -----------------------------------------------------
      */
 
-    const surgeries = surgeriesByPatient.get(patient.patient_id) || [];
+    const surgeries =
+      surgeriesByPatient.get(
+        patient.patient_id,
+      ) || [];
 
     if (criteria.previousSurgery) {
-      const matchedSurgery = surgeries.find(
-        (surgery) =>
-          containsValue(surgery.surgery_name, criteria.previousSurgery) ||
-          containsValue(surgery.surgery_code, criteria.previousSurgery) ||
-          containsValue(surgery.body_site, criteria.previousSurgery) ||
-          containsValue(
-            surgery.preoperative_diagnosis,
-            criteria.previousSurgery,
-          ),
-      );
+      const matchedSurgery =
+        surgeries.find(
+          (surgery) =>
+            containsValue(
+              surgery.surgery_name,
+              criteria.previousSurgery,
+            ) ||
+            containsValue(
+              surgery.surgery_code,
+              criteria.previousSurgery,
+            ) ||
+            containsValue(
+              surgery.body_site,
+              criteria.previousSurgery,
+            ) ||
+            containsValue(
+              surgery.preoperative_diagnosis,
+              criteria.previousSurgery,
+            ),
+        );
 
       if (matchedSurgery) {
         score += WEIGHTS.surgery;
@@ -547,20 +597,31 @@ const searchCandidates = async (criteria = {}) => {
     }
 
     /*
-     * -----------------------------------------------------
      * FRACTURE
-     * -----------------------------------------------------
      */
 
-    const fractures = fracturesByPatient.get(patient.patient_id) || [];
+    const fractures =
+      fracturesByPatient.get(
+        patient.patient_id,
+      ) || [];
 
     if (criteria.fracture) {
-      const matchedFracture = fractures.find(
-        (fracture) =>
-          containsValue(fracture.body_part, criteria.fracture) ||
-          containsValue(fracture.laterality, criteria.fracture) ||
-          containsValue(fracture.fracture_type, criteria.fracture),
-      );
+      const matchedFracture =
+        fractures.find(
+          (fracture) =>
+            containsValue(
+              fracture.body_part,
+              criteria.fracture,
+            ) ||
+            containsValue(
+              fracture.laterality,
+              criteria.fracture,
+            ) ||
+            containsValue(
+              fracture.fracture_type,
+              criteria.fracture,
+            ),
+        );
 
       if (matchedFracture) {
         score += WEIGHTS.fracture;
@@ -575,22 +636,39 @@ const searchCandidates = async (criteria = {}) => {
     }
 
     /*
-     * -----------------------------------------------------
-     * MEDICAL DEVICE / IMPLANT
-     * -----------------------------------------------------
+     * MEDICAL DEVICE
      */
 
-    const devices = devicesByPatient.get(patient.patient_id) || [];
+    const devices =
+      devicesByPatient.get(
+        patient.patient_id,
+      ) || [];
 
     if (criteria.implantOrDevice) {
-      const matchedDevice = devices.find(
-        (device) =>
-          containsValue(device.device_type, criteria.implantOrDevice) ||
-          containsValue(device.device_name, criteria.implantOrDevice) ||
-          containsValue(device.manufacturer, criteria.implantOrDevice) ||
-          containsValue(device.model_number, criteria.implantOrDevice) ||
-          containsValue(device.body_site, criteria.implantOrDevice),
-      );
+      const matchedDevice =
+        devices.find(
+          (device) =>
+            containsValue(
+              device.device_type,
+              criteria.implantOrDevice,
+            ) ||
+            containsValue(
+              device.device_name,
+              criteria.implantOrDevice,
+            ) ||
+            containsValue(
+              device.manufacturer,
+              criteria.implantOrDevice,
+            ) ||
+            containsValue(
+              device.model_number,
+              criteria.implantOrDevice,
+            ) ||
+            containsValue(
+              device.body_site,
+              criteria.implantOrDevice,
+            ),
+        );
 
       if (matchedDevice) {
         score += WEIGHTS.device;
@@ -605,19 +683,27 @@ const searchCandidates = async (criteria = {}) => {
     }
 
     /*
-     * -----------------------------------------------------
      * DENTAL
-     * -----------------------------------------------------
      */
 
-    const dentalRecords = dentalByPatient.get(patient.patient_id) || [];
+    const dentalRecords =
+      dentalByPatient.get(
+        patient.patient_id,
+      ) || [];
 
     if (criteria.dentalClue) {
-      const matchedDental = dentalRecords.find(
-        (record) =>
-          containsValue(record.tooth_number, criteria.dentalClue) ||
-          containsValue(record.condition, criteria.dentalClue),
-      );
+      const matchedDental =
+        dentalRecords.find(
+          (record) =>
+            containsValue(
+              record.tooth_number,
+              criteria.dentalClue,
+            ) ||
+            containsValue(
+              record.condition,
+              criteria.dentalClue,
+            ),
+        );
 
       if (matchedDental) {
         score += WEIGHTS.dental;
@@ -632,25 +718,27 @@ const searchCandidates = async (criteria = {}) => {
     }
 
     /*
-     * -----------------------------------------------------
      * CLINICAL OBSERVATION
-     * -----------------------------------------------------
      */
 
-    const observations = observationsByPatient.get(patient.patient_id) || [];
+    const observations =
+      observationsByPatient.get(
+        patient.patient_id,
+      ) || [];
 
     if (criteria.clinicalObservation) {
-      const matchedObservation = observations.find(
-        (observation) =>
-          containsValue(
-            observation.observation_type,
-            criteria.clinicalObservation,
-          ) ||
-          containsValue(
-            observation.observation_value,
-            criteria.clinicalObservation,
-          ),
-      );
+      const matchedObservation =
+        observations.find(
+          (observation) =>
+            containsValue(
+              observation.observation_type,
+              criteria.clinicalObservation,
+            ) ||
+            containsValue(
+              observation.observation_value,
+              criteria.clinicalObservation,
+            ),
+        );
 
       if (matchedObservation) {
         score += WEIGHTS.observation;
@@ -665,20 +753,31 @@ const searchCandidates = async (criteria = {}) => {
     }
 
     /*
-     * -----------------------------------------------------
      * TREATMENT
-     * -----------------------------------------------------
      */
 
-    const treatments = treatmentsByPatient.get(patient.patient_id) || [];
+    const treatments =
+      treatmentsByPatient.get(
+        patient.patient_id,
+      ) || [];
 
     if (criteria.treatment) {
-      const matchedTreatment = treatments.find(
-        (treatment) =>
-          containsValue(treatment.treatment_type, criteria.treatment) ||
-          containsValue(treatment.treatment_name, criteria.treatment) ||
-          containsValue(treatment.description, criteria.treatment),
-      );
+      const matchedTreatment =
+        treatments.find(
+          (treatment) =>
+            containsValue(
+              treatment.treatment_type,
+              criteria.treatment,
+            ) ||
+            containsValue(
+              treatment.treatment_name,
+              criteria.treatment,
+            ) ||
+            containsValue(
+              treatment.description,
+              criteria.treatment,
+            ),
+        );
 
       if (matchedTreatment) {
         score += WEIGHTS.treatment;
@@ -693,28 +792,35 @@ const searchCandidates = async (criteria = {}) => {
     }
 
     /*
-     * -----------------------------------------------------
      * INVESTIGATION
-     * -----------------------------------------------------
      */
 
     const investigations =
-      investigationsByPatient.get(patient.patient_id) || [];
+      investigationsByPatient.get(
+        patient.patient_id,
+      ) || [];
 
     if (criteria.investigation) {
-      const matchedInvestigation = investigations.find(
-        (investigation) =>
-          containsValue(
-            investigation.investigation_type,
-            criteria.investigation,
-          ) ||
-          containsValue(
-            investigation.investigation_name,
-            criteria.investigation,
-          ) ||
-          containsValue(investigation.result_summary, criteria.investigation) ||
-          containsValue(investigation.result_value, criteria.investigation),
-      );
+      const matchedInvestigation =
+        investigations.find(
+          (investigation) =>
+            containsValue(
+              investigation.investigation_type,
+              criteria.investigation,
+            ) ||
+            containsValue(
+              investigation.investigation_name,
+              criteria.investigation,
+            ) ||
+            containsValue(
+              investigation.result_summary,
+              criteria.investigation,
+            ) ||
+            containsValue(
+              investigation.result_value,
+              criteria.investigation,
+            ),
+        );
 
       if (matchedInvestigation) {
         score += WEIGHTS.investigation;
@@ -729,16 +835,19 @@ const searchCandidates = async (criteria = {}) => {
     }
 
     /*
-     * -----------------------------------------------------
-     * ONLY RETURN PATIENTS WITH AT LEAST ONE MATCH
-     * -----------------------------------------------------
+     * Only candidates with at least one matching clue
+     * are returned.
      */
 
     if (score > 0) {
       scoredCandidates.push({
         patientId: patient.patient_id,
         patientNumber: patient.patient_number,
-        name: [patient.first_name, patient.middle_name, patient.last_name]
+        name: [
+          patient.first_name,
+          patient.middle_name,
+          patient.last_name,
+        ]
           .filter(Boolean)
           .join(" "),
         dateOfBirth: patient.date_of_birth,
@@ -764,9 +873,14 @@ const searchCandidates = async (criteria = {}) => {
    * ---------------------------------------------------------
    */
 
-  scoredCandidates.sort((a, b) => b.score - a.score);
+  scoredCandidates.sort(
+    (a, b) => b.score - a.score,
+  );
 
-  return scoredCandidates.slice(0, 50);
+  return scoredCandidates.slice(
+    0,
+    50,
+  );
 };
 
 module.exports = {

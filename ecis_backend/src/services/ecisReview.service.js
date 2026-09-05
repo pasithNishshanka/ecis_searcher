@@ -1,6 +1,6 @@
 const pool = require("../config/database");
 
-const VALID_STATUSES = ["CONFIRMED", "REJECTED", "NEEDS_MORE_EVIDENCE"];
+const VALID_STATUSES = ["REJECTED", "NEEDS_MORE_EVIDENCE"];
 
 const reviewCandidate = async ({
   emergencyCaseId,

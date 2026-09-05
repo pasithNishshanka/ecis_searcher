@@ -1,4 +1,5 @@
 const express = require("express");
+
 const router = express.Router();
 
 const {
@@ -7,19 +8,47 @@ const {
   getReviewById,
 } = require("../controllers/ecisReview.controller");
 
-/*
- * Create a review
- */
-router.post("/reviews", createCandidateReview);
+const {
+  authenticate,
+} = require("../middleware/auth.middleware");
+
+const {
+  authorizeRoles,
+} = require(
+  "../middleware/authorization.middleware",
+);
 
 /*
- * Get all reviews for an emergency case
+ * Create candidate review.
+ *
+ * DOCTOR can reject a candidate or request
+ * additional evidence.
  */
-router.get("/reviews/emergency/:emergencyCaseId", getReviewsByEmergencyCase);
+router.post(
+  "/reviews",
+  authenticate,
+  authorizeRoles("DOCTOR"),
+  createCandidateReview,
+);
 
 /*
- * Get one review
+ * Get reviews for an emergency case.
  */
-router.get("/reviews/:reviewId", getReviewById);
+router.get(
+  "/reviews/emergency/:emergencyCaseId",
+  authenticate,
+  authorizeRoles("DOCTOR"),
+  getReviewsByEmergencyCase,
+);
+
+/*
+ * Get a specific review.
+ */
+router.get(
+  "/reviews/:reviewId",
+  authenticate,
+  authorizeRoles("DOCTOR"),
+  getReviewById,
+);
 
 module.exports = router;
