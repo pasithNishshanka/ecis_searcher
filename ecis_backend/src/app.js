@@ -8,6 +8,7 @@ const clinicalObservationRoutes = require("./routes/clinicalObservation.routes")
 const investigationRoutes = require("./routes/investigation.routes");
 const conditionRoutes = require("./routes/condition.routes");
 const surgeryRoutes = require('./routes/surgery.routes');
+const procedureRoutes = require('./routes/procedure.routes');
 const errorHandler = require("./middleware/error.middleware");
 
 const app = express();
@@ -41,6 +42,8 @@ app.use("/api/investigations", investigationRoutes);
 app.use("/api/conditions", conditionRoutes);
 
 app.use('/api/surgeries', surgeryRoutes);
+
+app.use('/api/procedures', procedureRoutes);
 
 app.use(errorHandler);
 
