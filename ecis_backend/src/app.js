@@ -17,6 +17,7 @@ const admissionRoutes = require("./routes/admission.routes");
 const clinicRoutes = require("./routes/clinic.routes");
 const emergencyRoutes = require("./routes/emergency.routes");
 const ecisRoutes = require("./routes/ecis.routes");
+const ecisReviewRoutes = require("./routes/ecisReview.routes");
 const errorHandler = require("./middleware/error.middleware");
 
 const app = express();
@@ -68,6 +69,8 @@ app.use("/api/clinics", clinicRoutes);
 app.use("/api/emergency", emergencyRoutes);
 
 app.use("/api/ecis", ecisRoutes);
+
+app.use("/api/ecis", ecisReviewRoutes);
 
 app.use(errorHandler);
 
