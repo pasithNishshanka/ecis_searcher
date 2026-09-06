@@ -20,9 +20,17 @@ async function createEmergencyCase(caseData) {
   try {
     await client.query("BEGIN");
 
-    // --------------------------------------------------
-    // 1. Validate patient when the case is identified
-    // --------------------------------------------------
+    if (!hospitalId) {
+      throw new Error("hospitalId is required");
+    }
+
+    if (!caseNumber || !caseNumber.trim()) {
+      throw new Error("caseNumber is required");
+    }
+
+    if (typeof unidentifiedPatient !== "boolean") {
+      throw new Error("unidentifiedPatient must be boolean");
+    }
 
     if (!unidentifiedPatient) {
       if (!patientId) {
@@ -33,13 +41,9 @@ async function createEmergencyCase(caseData) {
 
       const patientResult = await client.query(
         `
-          SELECT
-            patient_id,
-            hospital_id,
-            patient_number
-          FROM patients
-          WHERE
-            patient_id = $1
+          SELECT patient_id
+          FROM public.patients
+          WHERE patient_id = $1
             AND hospital_id = $2
             AND status = 'ACTIVE'
           FOR SHARE;
@@ -52,10 +56,6 @@ async function createEmergencyCase(caseData) {
       }
     }
 
-    // --------------------------------------------------
-    // 2. Unidentified case validation
-    // --------------------------------------------------
-
     if (unidentifiedPatient) {
       if (patientId) {
         throw new Error(
@@ -63,23 +63,22 @@ async function createEmergencyCase(caseData) {
         );
       }
 
-      if (!temporaryIdentityReference || !temporaryIdentityReference.trim()) {
+      if (
+        !temporaryIdentityReference ||
+        !temporaryIdentityReference.trim()
+      ) {
         throw new Error(
           "temporaryIdentityReference is required for unidentified cases",
         );
       }
     }
 
-    // --------------------------------------------------
-    // 3. Create emergency encounter when needed
-    // --------------------------------------------------
-
     let encounterId = null;
 
     if (patientId) {
       const encounterResult = await client.query(
         `
-          INSERT INTO encounters (
+          INSERT INTO public.encounters (
             patient_id,
             hospital_id,
             encounter_type,
@@ -113,13 +112,9 @@ async function createEmergencyCase(caseData) {
       encounterId = encounterResult.rows[0].encounter_id;
     }
 
-    // --------------------------------------------------
-    // 4. Create emergency case
-    // --------------------------------------------------
-
     const emergencyResult = await client.query(
       `
-        INSERT INTO emergency_cases (
+        INSERT INTO public.emergency_cases (
           hospital_id,
           encounter_id,
           patient_id,
@@ -181,86 +176,69 @@ async function createEmergencyCase(caseData) {
   }
 }
 
-async function getEmergencyCases() {
+async function getEmergencyCases(hospitalId) {
   const query = `
     SELECT
       e.emergency_case_id,
       e.case_number,
-
       e.arrival_date,
       e.arrival_mode,
       e.triage_level,
-
       e.chief_complaint,
       e.initial_condition,
-
       e.unidentified_patient,
       e.temporary_identity_reference,
-
       e.status,
-
       p.patient_id,
       p.patient_number,
-
       CONCAT(
         p.first_name,
         ' ',
         COALESCE(p.last_name, '')
       ) AS patient_name,
-
       h.hospital_id,
       h.hospital_name,
-
       u.user_id AS assigned_doctor_id,
       u.full_name AS assigned_doctor_name
-
-    FROM emergency_cases e
-
-    INNER JOIN hospitals h
+    FROM public.emergency_cases e
+    INNER JOIN public.hospitals h
       ON e.hospital_id = h.hospital_id
-
-    LEFT JOIN patients p
+    LEFT JOIN public.patients p
       ON e.patient_id = p.patient_id
-
-    LEFT JOIN hospital_users u
+    LEFT JOIN public.hospital_users u
       ON e.assigned_doctor_id = u.user_id
-
+    WHERE e.hospital_id = $1
     ORDER BY e.arrival_date DESC;
   `;
 
-  const result = await pool.query(query);
-
+  const result = await pool.query(query, [hospitalId]);
   return result.rows;
 }
 
-async function getEmergencyCaseById(emergencyCaseId) {
+async function getEmergencyCaseById(emergencyCaseId, hospitalId) {
   const query = `
     SELECT
       e.*,
-
       p.patient_number,
       p.first_name,
       p.last_name,
-
       h.hospital_name,
-
       u.full_name AS assigned_doctor_name
-
-    FROM emergency_cases e
-
-    INNER JOIN hospitals h
+    FROM public.emergency_cases e
+    INNER JOIN public.hospitals h
       ON e.hospital_id = h.hospital_id
-
-    LEFT JOIN patients p
+    LEFT JOIN public.patients p
       ON e.patient_id = p.patient_id
-
-    LEFT JOIN hospital_users u
+    LEFT JOIN public.hospital_users u
       ON e.assigned_doctor_id = u.user_id
-
-    WHERE e.emergency_case_id = $1;
+    WHERE e.emergency_case_id = $1
+      AND e.hospital_id = $2;
   `;
 
-  const result = await pool.query(query, [emergencyCaseId]);
+  const result = await pool.query(query, [
+    emergencyCaseId,
+    hospitalId,
+  ]);
 
   return result.rows[0] || null;
 }

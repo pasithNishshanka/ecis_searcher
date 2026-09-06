@@ -2,12 +2,17 @@ const emergencyService = require("../services/emergency.service");
 
 async function createEmergencyCase(req, res, next) {
   try {
-    const { hospitalId, caseNumber, unidentifiedPatient } = req.body;
+    const {
+      caseNumber,
+      unidentifiedPatient,
+    } = req.body;
+
+    const hospitalId = Number(req.user.hospitalId);
 
     if (!hospitalId) {
       return res.status(400).json({
         success: false,
-        message: "hospitalId is required",
+        message: "Authenticated hospital context is required",
       });
     }
 
@@ -25,7 +30,12 @@ async function createEmergencyCase(req, res, next) {
       });
     }
 
-    const result = await emergencyService.createEmergencyCase(req.body);
+    const result = await emergencyService.createEmergencyCase({
+      ...req.body,
+      hospitalId,
+      assignedDoctorId:
+        req.body.assignedDoctorId || req.user.userId,
+    });
 
     return res.status(201).json({
       success: true,
@@ -38,7 +48,7 @@ async function createEmergencyCase(req, res, next) {
       error.message.includes("cannot have") ||
       error.message.includes("not found")
     ) {
-      return res.status(409).json({
+      return res.status(400).json({
         success: false,
         message: error.message,
       });
@@ -50,7 +60,9 @@ async function createEmergencyCase(req, res, next) {
 
 async function getEmergencyCases(req, res, next) {
   try {
-    const cases = await emergencyService.getEmergencyCases();
+    const cases = await emergencyService.getEmergencyCases(
+      Number(req.user.hospitalId),
+    );
 
     return res.status(200).json({
       success: true,
@@ -66,8 +78,10 @@ async function getEmergencyCaseById(req, res, next) {
   try {
     const { emergencyCaseId } = req.params;
 
-    const emergencyCase =
-      await emergencyService.getEmergencyCaseById(emergencyCaseId);
+    const emergencyCase = await emergencyService.getEmergencyCaseById(
+      emergencyCaseId,
+      Number(req.user.hospitalId),
+    );
 
     if (!emergencyCase) {
       return res.status(404).json({

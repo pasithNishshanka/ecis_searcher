@@ -11,13 +11,8 @@ const requiredEnvVariables = [
 ];
 
 for (const variable of requiredEnvVariables) {
-  if (
-    !process.env[variable] ||
-    typeof process.env[variable] !== "string"
-  ) {
-    throw new Error(
-      `${variable} is missing or invalid in .env`,
-    );
+  if (!process.env[variable] || typeof process.env[variable] !== "string") {
+    throw new Error(`${variable} is missing or invalid in .env`);
   }
 }
 
@@ -27,13 +22,14 @@ const pool = new Pool({
   database: process.env.DB_NAME,
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
+  max: 10,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000,
+  statement_timeout: 15000,
 });
 
 pool.on("error", (error) => {
-  console.error(
-    "Unexpected PostgreSQL pool error:",
-    error.message,
-  );
+  console.error("Unexpected PostgreSQL pool error:", error.message);
 });
 
 module.exports = pool;

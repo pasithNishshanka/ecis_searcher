@@ -7,7 +7,9 @@
         ✚
       </div>
 
-      <h1 class="mt-5 text-center text-2xl font-black">ECIS Hospital System</h1>
+      <h1 class="mt-5 text-center text-2xl font-black">
+        ECIS Hospital System
+      </h1>
 
       <p class="mt-1 text-center text-sm text-slate-500">
         Authorized clinical staff portal
@@ -42,7 +44,11 @@
           {{ error }}
         </p>
 
-        <button type="submit" class="btn-primary w-full" :disabled="loading">
+        <button
+          type="submit"
+          class="btn-primary w-full"
+          :disabled="loading"
+        >
           {{ loading ? "Signing in..." : "Sign in" }}
         </button>
       </form>
@@ -56,9 +62,10 @@
 
 <script setup lang="ts">
 import { ref } from "vue";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 
 const router = useRouter();
+const route = useRoute();
 
 const staff = ref("");
 const password = ref("");
@@ -83,16 +90,34 @@ async function login() {
       }),
     });
 
-    const data = await response.json();
+    const result = await response.json();
 
     if (!response.ok) {
-      throw new Error(data.message || "Invalid staff ID or password.");
+      throw new Error(
+        result?.message || "Invalid staff ID or password.",
+      );
     }
 
-    localStorage.setItem("ecis-token", data.token);
-    localStorage.setItem("ecis-user", JSON.stringify(data.user));
+    const token = result?.data?.token;
+    const user = result?.data?.user;
 
-    router.push("/dashboard");
+    if (!token || !user) {
+      throw new Error(
+        "Login succeeded but authentication data was not returned.",
+      );
+    }
+
+    localStorage.setItem("ecis-token", token);
+    localStorage.setItem("ecis-user", JSON.stringify(user));
+
+    const redirect =
+      typeof route.query.redirect === "string" &&
+      route.query.redirect.startsWith("/") &&
+      !route.query.redirect.startsWith("//")
+        ? route.query.redirect
+        : "/dashboard";
+
+    await router.push(redirect);
   } catch (err) {
     error.value =
       err instanceof Error
