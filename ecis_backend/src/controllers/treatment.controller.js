@@ -37,6 +37,20 @@ async function createTreatment(req, res, next) {
   }
 }
 
+async function getAllTreatments(req, res, next) {
+  try {
+    const treatments = await treatmentService.getAllTreatments();
+
+    return res.status(200).json({
+      success: true,
+      count: treatments.length,
+      data: treatments,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
 async function getPatientTreatments(req, res, next) {
   try {
     const { patientId } = req.params;
@@ -79,4 +93,5 @@ module.exports = {
   createTreatment,
   getPatientTreatments,
   getTreatmentById,
+  getAllTreatments,
 };

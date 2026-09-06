@@ -1,9 +1,9 @@
-const pool = require('../config/database');
-
+const pool = require("../config/database");
 
 async function createProcedure(procedureData) {
   const {
     patientId,
+    hospitalId,
     encounterId,
     procedureCode,
     procedureName,
@@ -16,55 +16,99 @@ async function createProcedure(procedureData) {
     outcome,
   } = procedureData;
 
-  const query = `
-    INSERT INTO procedures (
-      patient_id,
-      encounter_id,
-      procedure_code,
-      procedure_name,
-      procedure_date,
-      body_site,
-      laterality,
-      performed_by,
-      indication,
-      findings,
-      outcome
-    )
-    VALUES (
-      $1,
-      $2,
-      $3,
-      $4,
-      COALESCE($5::timestamp, CURRENT_TIMESTAMP),
-      $6,
-      $7,
-      $8,
-      $9,
-      $10,
-      $11
-    )
-    RETURNING *;
-  `;
+  const client = await pool.connect();
 
-  const values = [
-    patientId,
-    encounterId,
-    procedureCode || null,
-    procedureName,
-    procedureDate || null,
-    bodySite || null,
-    laterality || null,
-    performedBy || null,
-    indication || null,
-    findings || null,
-    outcome || null,
-  ];
+  try {
+    await client.query("BEGIN");
 
-  const result = await pool.query(query, values);
+    /*
+     * Confirm patient exists.
+     */
+    const patientResult = await client.query(
+      `
+          SELECT
+            patient_id,
+            hospital_id
+          FROM patients
+          WHERE patient_id = $1
+          LIMIT 1;
+        `,
+      [patientId],
+    );
 
-  return result.rows[0];
+    if (!patientResult.rows[0]) {
+      throw new Error("Patient not found");
+    }
+
+    const patientHospitalId = patientResult.rows[0].hospital_id;
+
+    /*
+     * Ensure patient belongs
+     * to authenticated hospital.
+     */
+    if (hospitalId && Number(patientHospitalId) !== Number(hospitalId)) {
+      throw new Error("Patient does not belong to the authenticated hospital");
+    }
+
+    const result = await client.query(
+      `
+          INSERT INTO procedures (
+            patient_id,
+            encounter_id,
+            procedure_code,
+            procedure_name,
+            procedure_date,
+            body_site,
+            laterality,
+            performed_by,
+            indication,
+            findings,
+            outcome
+          )
+          VALUES (
+            $1,
+            $2,
+            $3,
+            $4,
+            COALESCE(
+              $5::timestamp,
+              CURRENT_TIMESTAMP
+            ),
+            $6,
+            $7,
+            $8,
+            $9,
+            $10,
+            $11
+          )
+          RETURNING *;
+        `,
+      [
+        patientId,
+        encounterId || null,
+        procedureCode || null,
+        procedureName,
+        procedureDate || null,
+        bodySite || null,
+        laterality || null,
+        performedBy || null,
+        indication || null,
+        findings || null,
+        outcome || null,
+      ],
+    );
+
+    await client.query("COMMIT");
+
+    return result.rows[0];
+  } catch (error) {
+    await client.query("ROLLBACK");
+
+    throw error;
+  } finally {
+    client.release();
+  }
 }
-
 
 async function getPatientProcedures(patientId) {
   const query = `
@@ -86,18 +130,19 @@ async function getPatientProcedures(patientId) {
     FROM procedures pr
 
     LEFT JOIN hospital_users u
-      ON pr.performed_by = u.user_id
+      ON pr.performed_by =
+         u.user_id
 
     WHERE pr.patient_id = $1
 
-    ORDER BY pr.procedure_date DESC;
+    ORDER BY
+      pr.procedure_date DESC;
   `;
 
   const result = await pool.query(query, [patientId]);
 
   return result.rows;
 }
-
 
 module.exports = {
   createProcedure,

@@ -12,68 +12,100 @@ const searchECISCandidates = async (req, res) => {
       });
     }
 
-    const emergencyCaseId = Number(criteria.emergencyCaseId);
+    /*
+     * Emergency case is OPTIONAL.
+     *
+     * ECIS can search the existing EHR directly.
+     * When an emergency case is supplied, we validate it
+     * and attach the search log to that case.
+     */
 
-    if (!Number.isInteger(emergencyCaseId) || emergencyCaseId <= 0) {
-      return res.status(400).json({
-        success: false,
-        message: "emergencyCaseId must be a valid positive number",
-      });
+    const emergencyCaseId =
+      criteria.emergencyCaseId !== undefined &&
+      criteria.emergencyCaseId !== null &&
+      criteria.emergencyCaseId !== ""
+        ? Number(criteria.emergencyCaseId)
+        : null;
+
+    let emergencyCase = null;
+
+    if (emergencyCaseId !== null) {
+      if (
+        !Number.isInteger(emergencyCaseId) ||
+        emergencyCaseId <= 0
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "emergencyCaseId must be a valid positive number",
+        });
+      }
+
+      const emergencyCaseResult = await pool.query(
+        `
+          SELECT
+            emergency_case_id,
+            hospital_id,
+            patient_id,
+            case_number,
+            unidentified_patient,
+            status
+          FROM public.emergency_cases
+          WHERE emergency_case_id = $1
+          LIMIT 1;
+        `,
+        [emergencyCaseId],
+      );
+
+      if (emergencyCaseResult.rows.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "Emergency case not found",
+        });
+      }
+
+      emergencyCase = emergencyCaseResult.rows[0];
+
+      if (
+        Number(emergencyCase.hospital_id) !==
+        Number(req.user.hospitalId)
+      ) {
+        return res.status(403).json({
+          success: false,
+          message:
+            "You do not have access to this emergency case",
+        });
+      }
+
+      if (!emergencyCase.unidentified_patient) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "ECIS case-linked search is only available for unidentified emergency cases",
+        });
+      }
     }
 
-    const emergencyCaseResult = await pool.query(
-      `
-        SELECT
-          emergency_case_id,
-          hospital_id,
-          patient_id,
-          case_number,
-          unidentified_patient,
-          status
-        FROM public.emergency_cases
-        WHERE emergency_case_id = $1
-        LIMIT 1;
-      `,
-      [emergencyCaseId],
-    );
-
-    if (emergencyCaseResult.rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "Emergency case not found",
-      });
-    }
-
-    const emergencyCase = emergencyCaseResult.rows[0];
-
-    if (
-      Number(emergencyCase.hospital_id) !==
-      Number(req.user.hospitalId)
-    ) {
-      return res.status(403).json({
-        success: false,
-        message: "You do not have access to this emergency case",
-      });
-    }
-
-    if (!emergencyCase.unidentified_patient) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "ECIS search is only available for unidentified emergency cases",
-      });
-    }
-
+    /*
+     * Remove emergencyCaseId before passing criteria
+     * to the matching engine.
+     */
     const {
       emergencyCaseId: _ignored,
       ...searchCriteria
     } = criteria;
 
-    const candidates = await ecisService.searchCandidates(
-      searchCriteria,
-      req.user.hospitalId,
-    );
+    const candidates =
+      await ecisService.searchCandidates(
+        searchCriteria,
+        req.user.hospitalId,
+      );
 
+    /*
+     * Search is always audited.
+     *
+     * emergency_case_id may be NULL when ECIS is being
+     * used as a standalone EHR search.
+     */
     await pool.query(
       `
         INSERT INTO public.ecis_search_logs (
@@ -94,13 +126,22 @@ const searchECISCandidates = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: "ECIS candidate search completed successfully",
-      emergencyCase: {
-        emergencyCaseId: emergencyCase.emergency_case_id,
-        caseNumber: emergencyCase.case_number,
-        hospitalId: emergencyCase.hospital_id,
-        status: emergencyCase.status,
-      },
+      message:
+        "ECIS candidate search completed successfully",
+
+      emergencyCase: emergencyCase
+        ? {
+            emergencyCaseId:
+              emergencyCase.emergency_case_id,
+            caseNumber:
+              emergencyCase.case_number,
+            hospitalId:
+              emergencyCase.hospital_id,
+            status:
+              emergencyCase.status,
+          }
+        : null,
+
       resultCount: candidates.length,
       candidates,
     });

@@ -148,8 +148,53 @@ async function getTreatmentById(treatmentId) {
   return result.rows[0] || null;
 }
 
+async function getAllTreatments() {
+  const query = `
+    SELECT
+      t.treatment_id,
+      t.patient_id,
+      t.encounter_id,
+      t.opd_visit_id,
+      t.clinic_visit_id,
+      t.admission_id,
+      t.emergency_case_id,
+      t.treatment_date,
+      t.treatment_type,
+      t.treatment_name,
+      t.description,
+      t.body_site,
+      t.laterality,
+      t.performed_by,
+      t.outcome,
+      t.complications,
+
+      p.patient_number,
+      p.first_name,
+      p.last_name,
+
+      u.full_name AS performed_by_name
+
+    FROM public.treatment_records t
+
+    INNER JOIN public.patients p
+      ON t.patient_id = p.patient_id
+
+    LEFT JOIN public.hospital_users u
+      ON t.performed_by = u.user_id
+
+    WHERE p.hospital_id = $1
+
+    ORDER BY t.treatment_date DESC;
+  `;
+
+  const result = await pool.query(query, [1]);
+
+  return result.rows;
+}
+
 module.exports = {
   createTreatment,
+  getAllTreatments,
   getPatientTreatments,
   getTreatmentById,
 };
