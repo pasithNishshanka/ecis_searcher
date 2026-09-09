@@ -13,182 +13,398 @@ import type {
   ECISFilters,
 } from "../types";
 
-type Bed = Ward["beds"][number];
 
-const API_BASE = "http://localhost:5000/api";
+/* ============================================================
+   API
+   ============================================================ */
 
-const demoWards: Ward[] = [
-  {
-    id: "W01",
-    name: "Medical Ward A",
-    department: "Medicine",
-    floor: "1",
-    capacity: 30,
-    beds: Array.from(
-      { length: 30 },
-      (_: unknown, i: number): Bed => ({
-        id: `A-${i + 1}`,
-        number: `A-${String(i + 1).padStart(2, "0")}`,
-        status: i < 22 ? "OCCUPIED" : "AVAILABLE",
-      }),
-    ),
-  },
-  {
-    id: "W02",
-    name: "Surgical Ward",
-    department: "Surgery",
-    floor: "2",
-    capacity: 24,
-    beds: Array.from(
-      { length: 24 },
-      (_: unknown, i: number): Bed => ({
-        id: `S-${i + 1}`,
-        number: `S-${String(i + 1).padStart(2, "0")}`,
-        status: i < 17 ? "OCCUPIED" : "AVAILABLE",
-      }),
-    ),
-  },
-  {
-    id: "W03",
-    name: "Pediatric Ward",
-    department: "Pediatrics",
-    floor: "2",
-    capacity: 20,
-    beds: Array.from(
-      { length: 20 },
-      (_: unknown, i: number): Bed => ({
-        id: `P-${i + 1}`,
-        number: `P-${String(i + 1).padStart(2, "0")}`,
-        status: i < 12 ? "OCCUPIED" : "AVAILABLE",
-      }),
-    ),
-  },
-];
+const API_BASE =
+  "http://localhost:5000/api";
 
-const db = reactive<{
-  patients: Patient[];
-  treatments: TreatmentRecord[];
-  wards: Ward[];
-  emergencies: EmergencyCase[];
-}>({
-  patients: [],
-  treatments: [],
-  wards: demoWards,
-  emergencies: [],
-});
-
-const loading = ref(false);
-const loadError = ref("");
 
 function getToken(): string {
-  return localStorage.getItem("ecis-token") || "";
+  return (
+    localStorage.getItem(
+      "ecis-token",
+    ) || ""
+  );
 }
 
-async function apiGet<T>(path: string): Promise<T> {
-  const token = getToken();
 
-  const response = await fetch(`${API_BASE}${path}`, {
-    method: "GET",
-    headers: {
-      "Content-Type": "application/json",
-      ...(token
-        ? {
-            Authorization: `Bearer ${token}`,
-          }
-        : {}),
-    },
-  });
+async function request<T>(
+  path: string,
+  options: RequestInit = {},
+): Promise<T> {
+  const headers =
+    new Headers(
+      options.headers,
+    );
 
-  const raw = await response.text();
 
-  let data: any = {};
+  headers.set(
+    "Content-Type",
+    "application/json",
+  );
 
-  try {
-    data = raw ? JSON.parse(raw) : {};
-  } catch {
-    data = {};
-  }
 
-  if (!response.ok) {
-    throw new Error(
-      data?.message ||
-        data?.error ||
-        `Request failed with status ${response.status}`,
+  const jwt =
+    getToken();
+
+
+  if (jwt) {
+    headers.set(
+      "Authorization",
+      `Bearer ${jwt}`,
     );
   }
 
-  return data;
+
+  const response =
+    await fetch(
+      `${API_BASE}${path}`,
+      {
+        ...options,
+
+        headers,
+      },
+    );
+
+
+  const raw =
+    await response.text();
+
+
+  let body: any =
+    {};
+
+
+  try {
+    body =
+      raw
+        ? JSON.parse(raw)
+        : {};
+  } catch {
+    body = {};
+  }
+
+
+  if (!response.ok) {
+    throw new Error(
+      body?.message ||
+        body?.error ||
+        `HTTP ${response.status}`,
+    );
+  }
+
+
+  return body as T;
 }
 
-function extractArray<T>(response: any): T[] {
-  if (Array.isArray(response)) {
+
+async function apiGet<T>(
+  path: string,
+): Promise<T> {
+  return request<T>(
+    path,
+    {
+      method: "GET",
+    },
+  );
+}
+
+
+async function apiPost<T>(
+  path: string,
+  payload: unknown,
+): Promise<T> {
+  return request<T>(
+    path,
+    {
+      method: "POST",
+
+      body:
+        JSON.stringify(
+          payload,
+        ),
+    },
+  );
+}
+
+
+async function apiPut<T>(
+  path: string,
+  payload: unknown,
+): Promise<T> {
+  return request<T>(
+    path,
+    {
+      method: "PUT",
+
+      body:
+        JSON.stringify(
+          payload,
+        ),
+    },
+  );
+}
+
+
+/* ============================================================
+   DEMO WARD CONFIGURATION
+   ============================================================ */
+
+function makeBeds(
+  prefix: string,
+  count: number,
+  occupied: number,
+): Ward["beds"] {
+  return Array.from(
+    {
+      length: count,
+    },
+
+    (_, index) => ({
+      id:
+        `${prefix}-${index + 1}`,
+
+      number:
+        `${prefix}-${String(
+          index + 1,
+        ).padStart(
+          2,
+          "0",
+        )}`,
+
+      status:
+        index < occupied
+          ? "OCCUPIED"
+          : "AVAILABLE",
+    }),
+  );
+}
+
+
+const demoWards:
+  Ward[] = [
+    {
+      id: "W01",
+
+      name:
+        "Medical Ward A",
+
+      department:
+        "Medicine",
+
+      floor: "1",
+
+      capacity: 30,
+
+      beds:
+        makeBeds(
+          "A",
+          30,
+          22,
+        ),
+    },
+
+    {
+      id: "W02",
+
+      name:
+        "Surgical Ward",
+
+      department:
+        "Surgery",
+
+      floor: "2",
+
+      capacity: 24,
+
+      beds:
+        makeBeds(
+          "S",
+          24,
+          17,
+        ),
+    },
+
+    {
+      id: "W03",
+
+      name:
+        "Pediatric Ward",
+
+      department:
+        "Pediatrics",
+
+      floor: "2",
+
+      capacity: 20,
+
+      beds:
+        makeBeds(
+          "P",
+          20,
+          12,
+        ),
+    },
+  ];
+
+
+/* ============================================================
+   REACTIVE STATE
+   ============================================================ */
+
+const db =
+  reactive<{
+    patients: Patient[];
+
+    treatments:
+      TreatmentRecord[];
+
+    wards: Ward[];
+
+    emergencies:
+      EmergencyCase[];
+  }>({
+    patients: [],
+
+    treatments: [],
+
+    wards:
+      demoWards,
+
+    emergencies: [],
+  });
+
+
+const loading =
+  ref(false);
+
+
+const loadError =
+  ref("");
+
+
+/* ============================================================
+   HELPERS
+   ============================================================ */
+
+function responseArray(
+  response: any,
+): any[] {
+  if (
+    Array.isArray(
+      response,
+    )
+  ) {
     return response;
   }
 
-  if (Array.isArray(response?.data)) {
+
+  if (
+    Array.isArray(
+      response?.data,
+    )
+  ) {
     return response.data;
   }
 
-  if (Array.isArray(response?.rows)) {
+
+  if (
+    Array.isArray(
+      response?.rows,
+    )
+  ) {
     return response.rows;
   }
 
-  if (Array.isArray(response?.patients)) {
-    return response.patients;
-  }
-
-  if (Array.isArray(response?.treatments)) {
-    return response.treatments;
-  }
-
-  if (Array.isArray(response?.emergencies)) {
-    return response.emergencies;
-  }
-
-  if (Array.isArray(response?.cases)) {
-    return response.cases;
-  }
 
   return [];
 }
 
-function mapPatient(row: any): Patient {
+
+/* ============================================================
+   MAP PATIENT
+   ============================================================ */
+
+function mapPatient(
+  row: any,
+): Patient {
+  const allergies =
+    Array.isArray(
+      row?.allergies,
+    )
+      ? row.allergies
+      : [];
+
+
+  const foodAllergies =
+    allergies
+      .filter(
+        (
+          item: any,
+        ) =>
+          item?.category ===
+          "FOOD",
+      )
+      .map(
+        (
+          item: any,
+        ) =>
+          String(
+            item?.name || "",
+          ),
+      )
+      .filter(Boolean);
+
+
+  const medicalAllergies =
+    allergies
+      .filter(
+        (
+          item: any,
+        ) =>
+          item?.category ===
+          "MEDICAL_DRUG",
+      )
+      .map(
+        (
+          item: any,
+        ) =>
+          String(
+            item?.name || "",
+          ),
+      )
+      .filter(Boolean);
+
+
   return {
     id: String(
-      row?.id ??
-        row?.patient_id ??
-        row?.patientId ??
-        row?.patient_number ??
-        row?.patientNumber ??
+      row?.patient_id ??
+        row?.id ??
         "",
     ),
 
-    patientNumber: String(
-      row?.patientNumber ??
+    patientNumber:
+      String(
         row?.patient_number ??
-        row?.id ??
-        row?.patient_id ??
-        "",
-    ),
+          "",
+      ),
 
     nic:
-      row?.nic ??
       row?.nic_number ??
-      row?.nicNumber ??
       "",
 
     firstName:
-      row?.firstName ??
       row?.first_name ??
       "",
 
     lastName:
-      row?.lastName ??
       row?.last_name ??
       "",
 
     dateOfBirth:
-      row?.dateOfBirth ??
       row?.date_of_birth ??
       "",
 
@@ -197,13 +413,24 @@ function mapPatient(row: any): Patient {
       "",
 
     bloodGroup:
-      row?.bloodGroup ??
       row?.blood_group ??
       "",
 
+    heightCm:
+      row?.height_cm != null
+        ? Number(
+            row.height_cm,
+          )
+        : 0,
+
+    weightKg:
+      row?.weight_kg != null
+        ? Number(
+            row.weight_kg,
+          )
+        : 0,
+
     phone:
-      row?.phone ??
-      row?.primaryPhone ??
       row?.primary_phone ??
       "",
 
@@ -223,66 +450,68 @@ function mapPatient(row: any): Patient {
       row?.district ??
       "",
 
-    heightCm:
-      row?.heightCm ??
-      row?.height_cm ??
-      undefined,
-
-    weightKg:
-      row?.weightKg ??
-      row?.weight_kg ??
-      undefined,
-
-    allergies:
-      row?.allergies ?? [],
-
-    foodAllergies:
-      row?.foodAllergies ??
-      [],
-
-    medicalAllergies:
-      row?.medicalAllergies ??
-      [],
-
-    chronicDiseases:
-      row?.chronicDiseases ??
-      [],
-
     workplace:
-      row?.workplace ??
       row?.occupation ??
       "",
 
+    foodAllergies,
+
+    medicalAllergies,
+
+    allergies:
+      [
+        ...foodAllergies,
+        ...medicalAllergies,
+      ],
+
+    chronicDiseases:
+      Array.isArray(
+        row?.chronicDiseases,
+      )
+        ? row.chronicDiseases
+        : [],
+
+    registrationNotes:
+      row?.registration_notes ??
+      "",
+
     createdAt:
-      row?.createdAt ??
       row?.created_at ??
+      row?.registered_at ??
       "",
   };
 }
 
-function mapTreatment(row: any): TreatmentRecord {
+
+/* ============================================================
+   MAP TREATMENT
+   ============================================================ */
+
+function mapTreatment(
+  row: any,
+): TreatmentRecord {
   return {
     id: String(
-      row?.id ??
-        row?.treatment_id ??
+      row?.treatment_id ??
+        row?.id ??
         "",
     ),
 
-    patientId: String(
-      row?.patientId ??
+    patientId:
+      String(
         row?.patient_id ??
-        "",
-    ),
+          row?.patientId ??
+          "",
+      ),
 
     type:
-      row?.type ??
       row?.treatment_type ??
+      row?.type ??
       "OPD",
 
     date:
-      row?.date ??
-      row?.treatmentDate ??
       row?.treatment_date ??
+      row?.date ??
       "",
 
     department:
@@ -291,25 +520,24 @@ function mapTreatment(row: any): TreatmentRecord {
 
     doctor:
       row?.doctor ??
+      row?.performed_by_name ??
       "",
 
     diagnosis:
       row?.diagnosis ??
-      row?.description ??
       "",
 
     treatment:
-      row?.treatment ??
       row?.treatment_name ??
+      row?.treatment ??
       "",
 
     notes:
-      row?.notes ??
       row?.description ??
+      row?.notes ??
       "",
 
     bodyRegion:
-      row?.bodyRegion ??
       row?.body_site ??
       "",
 
@@ -323,7 +551,6 @@ function mapTreatment(row: any): TreatmentRecord {
 
     implantSerial:
       row?.implantSerial ??
-      row?.serial_number ??
       "",
 
     scar:
@@ -348,33 +575,48 @@ function mapTreatment(row: any): TreatmentRecord {
   };
 }
 
-function mapEmergency(row: any): EmergencyCase {
+
+/* ============================================================
+   MAP EMERGENCY
+   ============================================================ */
+
+function mapEmergency(
+  row: any,
+): EmergencyCase {
+  const patientId =
+    row?.patient_id ??
+    row?.patientId;
+
+
   const unidentified =
     Boolean(
       row?.unidentified_patient ??
-        row?.unidentifiedPatient ??
-        false,
+        row?.unidentifiedPatient,
     );
 
-  const patientId =
-    row?.patientId ??
-    row?.patient_id;
 
   return {
-    id: String(
-      row?.id ??
-        row?.case_number ??
+    id:
+      String(
         row?.emergency_case_id ??
-        "",
-    ),
+          row?.case_number ??
+          row?.id ??
+          "",
+      ),
+
+    patientId:
+      patientId != null
+        ? String(
+            patientId,
+          )
+        : undefined,
 
     arrival:
-      row?.arrival ??
       row?.arrival_date ??
+      row?.arrival ??
       "",
 
     description:
-      row?.description ??
       row?.chief_complaint ??
       row?.initial_condition ??
       "",
@@ -386,165 +628,461 @@ function mapEmergency(row: any): EmergencyCase {
     status:
       unidentified
         ? "UNIDENTIFIED"
-        : row?.status ??
-          "IN_TREATMENT",
-
-    patientId:
-      patientId != null
-        ? String(patientId)
-        : undefined,
+        : (
+            row?.status ??
+            "IN_TREATMENT"
+          ),
   };
 }
 
-async function loadBackendData(): Promise<void> {
-  loading.value = true;
-  loadError.value = "";
 
-  try {
-    const [
-      patientsResponse,
-      treatmentsResponse,
-      emergenciesResponse,
-    ] = await Promise.all([
-      apiGet<any>("/patients"),
-      apiGet<any>("/treatments"),
-      apiGet<any>("/emergency"),
-    ]);
+/* ============================================================
+   LOAD PATIENTS
+   ============================================================ */
 
-    const patientRows =
-      extractArray<any>(
-        patientsResponse,
-      );
-
-    const treatmentRows =
-      extractArray<any>(
-        treatmentsResponse,
-      );
-
-    const emergencyRows =
-      extractArray<any>(
-        emergenciesResponse,
-      );
-
-    db.patients.splice(
-      0,
-      db.patients.length,
-      ...patientRows.map(mapPatient),
+async function loadPatients() {
+  const response =
+    await apiGet<any>(
+      "/patients",
     );
+
+
+  const rows =
+    responseArray(
+      response,
+    );
+
+
+  db.patients.splice(
+    0,
+
+    db.patients.length,
+
+    ...rows.map(
+      mapPatient,
+    ),
+  );
+}
+
+
+/* ============================================================
+   LOAD TREATMENTS
+   ============================================================ */
+
+async function loadTreatments() {
+  try {
+    const response =
+      await apiGet<any>(
+        "/treatments",
+      );
+
+
+    const rows =
+      responseArray(
+        response,
+      );
+
 
     db.treatments.splice(
       0,
-      db.treatments.length,
-      ...treatmentRows.map(mapTreatment),
-    );
 
-    db.emergencies.splice(
-      0,
-      db.emergencies.length,
-      ...emergencyRows.map(mapEmergency),
+      db.treatments.length,
+
+      ...rows.map(
+        mapTreatment,
+      ),
     );
   } catch (error) {
-    loadError.value =
-      error instanceof Error
-        ? error.message
-        : "Failed to load EHR data.";
+    /*
+     * Treatment API is currently independent.
+     * Do not break patients when it fails.
+     */
 
-    console.error(
-      "Failed to load EHR backend data:",
+    console.warn(
+      "Treatment load failed:",
       error,
     );
-
-    /*
-     * Do NOT overwrite the backend-independent ward
-     * configuration when EHR API loading fails.
-     */
-  } finally {
-    loading.value = false;
   }
 }
 
-export function useEHR() {
-  const patients = computed(
-    () => db.patients,
-  );
 
-  const treatments = computed(
-    () => db.treatments,
-  );
+/* ============================================================
+   LOAD EMERGENCIES
+   ============================================================ */
 
-  const wards = computed(
-    () => db.wards,
-  );
+async function loadEmergencies() {
+  try {
+    const response =
+      await apiGet<any>(
+        "/emergency",
+      );
 
-  const emergencies = computed(
-    () => db.emergencies,
-  );
 
-  const patientById = (
-    id: string,
-  ) =>
-    patients.value.find(
-      (patient: Patient) =>
-        String(patient.id) === String(id) ||
-        String(patient.patientNumber) ===
-          String(id),
+    const rows =
+      responseArray(
+        response,
+      );
+
+
+    db.emergencies.splice(
+      0,
+
+      db.emergencies.length,
+
+      ...rows.map(
+        mapEmergency,
+      ),
+    );
+  } catch (error) {
+    console.warn(
+      "Emergency load failed:",
+      error,
+    );
+  }
+}
+
+
+/* ============================================================
+   LOAD EVERYTHING
+   ============================================================ */
+
+async function loadBackendData() {
+  loading.value =
+    true;
+
+  loadError.value =
+    "";
+
+
+  try {
+    /*
+     * Patients are mandatory.
+     */
+    await loadPatients();
+  } catch (error) {
+    console.error(
+      "PATIENT LOAD FAILED:",
+      error,
     );
 
-  const treatmentsForPatient = (
+
+    loadError.value =
+      error instanceof Error
+        ? error.message
+        : "Unable to load patients.";
+  }
+
+
+  /*
+   * Other modules cannot break
+   * the patient registry.
+   */
+  await loadTreatments();
+
+  await loadEmergencies();
+
+
+  loading.value =
+    false;
+}
+
+
+/* ============================================================
+   STORE
+   ============================================================ */
+
+export function useEHR() {
+  const patients =
+    computed(
+      () =>
+        db.patients,
+    );
+
+
+  const treatments =
+    computed(
+      () =>
+        db.treatments,
+    );
+
+
+  const wards =
+    computed(
+      () =>
+        db.wards,
+    );
+
+
+  const emergencies =
+    computed(
+      () =>
+        db.emergencies,
+    );
+
+
+  /* ----------------------------------------------------------
+     FIND PATIENT
+     ---------------------------------------------------------- */
+
+  function patientById(
     id: string,
-  ) =>
-    treatments.value
-      .filter(
-        (treatment: TreatmentRecord) =>
-          String(treatment.patientId) ===
+  ) {
+    return patients.value.find(
+      (
+        patient,
+      ) =>
+        String(
+          patient.id,
+        ) ===
+          String(id) ||
+
+        String(
+          patient.patientNumber,
+        ) ===
           String(id),
+    );
+  }
+
+
+  /* ----------------------------------------------------------
+     PATIENT TREATMENTS
+     ---------------------------------------------------------- */
+
+  function treatmentsForPatient(
+    patientId: string,
+  ) {
+    return treatments.value
+      .filter(
+        (
+          treatment,
+        ) =>
+          String(
+            treatment.patientId,
+          ) ===
+            String(
+              patientId,
+            ),
       )
       .sort(
         (
-          a: TreatmentRecord,
-          b: TreatmentRecord,
+          a,
+          b,
         ) =>
-          String(b.date).localeCompare(
-            String(a.date),
+          String(
+            b.date,
+          ).localeCompare(
+            String(
+              a.date,
+            ),
           ),
       );
+  }
 
-  async function refresh(): Promise<void> {
+
+  /* ----------------------------------------------------------
+     REFRESH
+     ---------------------------------------------------------- */
+
+  async function refresh() {
     await loadBackendData();
   }
 
-  function addPatient(
+
+  /* ----------------------------------------------------------
+     CREATE PATIENT
+     ---------------------------------------------------------- */
+
+  async function addPatient(
     data: Omit<
       Patient,
-      "id" | "patientNumber" | "createdAt"
+      "id" |
+      "patientNumber" |
+      "createdAt"
     >,
   ) {
-    const next =
-      Math.max(
-        0,
-        ...patients.value.map(
-          (patient: Patient) =>
-            Number(
-              String(
-                patient.patientNumber,
-              ).replace(/\D/g, ""),
-            ) || 0,
-        ),
-      ) + 1;
+    const response =
+      await apiPost<any>(
+        "/patients",
+        {
+          firstName:
+            data.firstName,
 
-    const id =
-      `P${String(next).padStart(6, "0")}`;
+          lastName:
+            data.lastName,
 
-    db.patients.unshift({
-      ...data,
-      id,
-      patientNumber: id,
-      createdAt:
-        new Date().toISOString(),
-    });
+          nicNumber:
+            data.nic ||
+            null,
 
-    return id;
+          dateOfBirth:
+            data.dateOfBirth,
+
+          gender:
+            data.gender,
+
+          bloodGroup:
+            data.bloodGroup,
+
+          heightCm:
+            data.heightCm ||
+            null,
+
+          weightKg:
+            data.weightKg ||
+            null,
+
+          primaryPhone:
+            data.phone ||
+            null,
+
+          email:
+            data.email ||
+            null,
+
+          address:
+            data.address ||
+            null,
+
+          province:
+            data.province ||
+            null,
+
+          district:
+            data.district ||
+            null,
+
+          occupation:
+            data.workplace ||
+            null,
+
+          registrationNotes:
+            data.registrationNotes ||
+            null,
+
+          foodAllergies:
+            data.foodAllergies ||
+            [],
+
+          medicalAllergies:
+            data.medicalAllergies ||
+            [],
+
+          status:
+            "ACTIVE",
+        },
+      );
+
+
+    if (!response?.data) {
+      throw new Error(
+        "Server did not return the created patient.",
+      );
+    }
+
+
+    /*
+     * Do NOT manually generate P000xxx.
+     * PostgreSQL is authoritative.
+     */
+    await loadPatients();
+
+
+    return mapPatient(
+      response.data,
+    );
   }
+
+
+  /* ----------------------------------------------------------
+     UPDATE PATIENT
+     ---------------------------------------------------------- */
+
+  async function updatePatient(
+    patientId: string,
+    data: Partial<Patient>,
+  ) {
+    const response =
+      await apiPut<any>(
+        `/patients/${patientId}`,
+        {
+          firstName:
+            data.firstName,
+
+          lastName:
+            data.lastName,
+
+          nicNumber:
+            data.nic ||
+
+            undefined,
+
+          dateOfBirth:
+            data.dateOfBirth,
+
+          gender:
+            data.gender,
+
+          bloodGroup:
+            data.bloodGroup,
+
+          heightCm:
+            data.heightCm,
+
+          weightKg:
+            data.weightKg,
+
+          primaryPhone:
+            data.phone,
+
+          email:
+            data.email,
+
+          address:
+            data.address,
+
+          province:
+            data.province,
+
+          district:
+            data.district,
+
+          occupation:
+            data.workplace,
+
+          registrationNotes:
+            data.registrationNotes,
+
+          foodAllergies:
+            data.foodAllergies,
+
+          medicalAllergies:
+            data.medicalAllergies,
+
+          status:
+            "ACTIVE",
+        },
+      );
+
+
+    if (!response?.data) {
+      throw new Error(
+        "Server did not return the updated patient.",
+      );
+    }
+
+
+    await loadPatients();
+
+
+    return mapPatient(
+      response.data,
+    );
+  }
+
+
+  /* ----------------------------------------------------------
+     TEMPORARY LOCAL TREATMENT COMPATIBILITY
+     ---------------------------------------------------------- */
 
   function addTreatment(
     data: Omit<
@@ -554,9 +1092,16 @@ export function useEHR() {
   ) {
     db.treatments.unshift({
       ...data,
-      id: `T${Date.now()}`,
+
+      id:
+        `LOCAL-${Date.now()}`,
     });
   }
+
+
+  /* ----------------------------------------------------------
+     WARD
+     ---------------------------------------------------------- */
 
   function addWard(
     name: string,
@@ -566,36 +1111,57 @@ export function useEHR() {
   ) {
     const id =
       `W${String(
-        wards.value.length + 1,
-      ).padStart(2, "0")}`;
+        wards.value.length +
+          1,
+      ).padStart(
+        2,
+        "0",
+      )}`;
+
 
     db.wards.push({
       id,
+
       name,
+
       department,
+
       floor,
+
       capacity,
 
       beds: Array.from(
-        { length: capacity },
+        {
+          length: capacity,
+        },
+
         (
-          _unused: unknown,
-          i: number,
-        ): Bed => ({
-          id: `${id}-${i + 1}`,
+          _,
+          index,
+        ) => ({
+          id:
+            `${id}-${index + 1}`,
 
           number:
             `${name
-              .slice(0, 1)
+              .slice(
+                0,
+                1,
+              )
               .toUpperCase()}-${String(
-              i + 1,
-            ).padStart(2, "0")}`,
+              index + 1,
+            ).padStart(
+              2,
+              "0",
+            )}`,
 
-          status: "AVAILABLE",
+          status:
+            "AVAILABLE",
         }),
       ),
     });
   }
+
 
   function assignBed(
     wardId: string,
@@ -604,50 +1170,41 @@ export function useEHR() {
   ) {
     const ward =
       db.wards.find(
-        (w: Ward) =>
-          w.id === wardId,
+        (
+          item,
+        ) =>
+          item.id ===
+          wardId,
       );
+
 
     const bed =
       ward?.beds.find(
-        (b: Bed) =>
-          b.id === bedId,
+        (
+          item,
+        ) =>
+          item.id ===
+          bedId,
       );
+
 
     if (!bed) {
       return;
     }
 
-    bed.status = "OCCUPIED";
-    bed.patientId = patientId;
 
-    addTreatment({
-      patientId,
+    bed.status =
+      "OCCUPIED";
 
-      type: "WARD",
 
-      date: new Date()
-        .toISOString()
-        .slice(0, 10),
-
-      department:
-        ward?.department ||
-        "Inpatient",
-
-      doctor: "",
-
-      diagnosis:
-        "Ward admission",
-
-      treatment:
-        `Admitted to ${
-          ward?.name || "ward"
-        } — Bed ${bed.number}`,
-
-      notes:
-        "Ward admission recorded from Ward & Beds module.",
-    });
+    bed.patientId =
+      patientId;
   }
+
+
+  /* ----------------------------------------------------------
+     EMERGENCY
+     ---------------------------------------------------------- */
 
   function addEmergency(
     data: Omit<
@@ -657,371 +1214,392 @@ export function useEHR() {
   ) {
     db.emergencies.unshift({
       ...data,
+
       id:
-        `ER-${Date.now()
-          .toString()
-          .slice(-5)}`,
+        `LOCAL-${Date.now()}`,
     });
   }
 
-  /*
-   * Local ECIS helper retained for components
-   * that may still call useEHR().searchECIS().
-   *
-   * The actual ECIS screen should continue using
-   * the backend /ecis/search endpoint.
-   */
+
+  /* ----------------------------------------------------------
+     ECIS LOCAL FALLBACK
+     ---------------------------------------------------------- */
+
   function searchECIS(
-    f: ECISFilters,
+    filters: ECISFilters,
   ) {
-    const inRange = (
-      value: number,
-      min?: number,
-      max?: number,
-    ) =>
-      (min == null ||
-        value >= min) &&
-      (max == null ||
-        value <= max);
+    const getAge =
+      (
+        dateString: string,
+      ) => {
+        const timestamp =
+          new Date(
+            dateString,
+          ).getTime();
+
+
+        if (
+          Number.isNaN(
+            timestamp,
+          )
+        ) {
+          return 0;
+        }
+
+
+        return Math.floor(
+          (
+            Date.now() -
+            timestamp
+          ) /
+            31557600000,
+        );
+      };
+
 
     return patients.value
       .map(
-        (patient: Patient) => {
+        (
+          patient,
+        ) => {
           const records =
             treatmentsForPatient(
               patient.id,
             );
 
+
           const clinicalText =
             records
               .map(
                 (
-                  treatment: TreatmentRecord,
+                  record,
                 ) =>
                   [
-                    treatment.diagnosis,
-                    treatment.treatment,
-                    treatment.notes,
-                    treatment.bodyRegion,
-                    treatment.clinicalFinding,
-                    treatment.implant,
-                    treatment.scar,
-                    treatment.birthmark,
-                    treatment.tattoo,
-                    treatment.missingBodyPart,
-                    treatment.oldFracture,
+                    record
+                      .diagnosis,
+
+                    record
+                      .treatment,
+
+                    record
+                      .notes,
+
+                    record
+                      .bodyRegion,
+
+                    record
+                      .clinicalFinding,
+
+                    record
+                      .implant,
+
+                    record
+                      .scar,
+
+                    record
+                      .oldFracture,
+
+                    record
+                      .birthmark,
+
+                    record
+                      .tattoo,
+
+                    record
+                      .missingBodyPart,
                   ]
-                    .filter(Boolean)
-                    .join(" "),
+                    .filter(
+                      Boolean,
+                    )
+                    .join(
+                      " ",
+                    ),
               )
-              .join(" ")
+              .join(
+                " ",
+              )
               .toLowerCase();
 
-          const age =
-            Math.floor(
-              (Date.now() -
-                new Date(
-                  patient.dateOfBirth,
-                ).getTime()) /
-                31557600000,
+
+          let score =
+            0;
+
+
+          const evidence:
+            string[] = [];
+
+
+          const patientAge =
+            getAge(
+              patient
+                .dateOfBirth,
             );
 
-          let score = 0;
-
-          const evidence: string[] =
-            [];
 
           if (
             (
-              f.ageMin != null ||
-              f.ageMax != null
+              filters.ageMin !=
+                null ||
+              filters.ageMax !=
+                null
             ) &&
-            inRange(
-              age,
-              f.ageMin,
-              f.ageMax,
+            (
+              filters.ageMin ==
+                null ||
+              patientAge >=
+                filters.ageMin
+            ) &&
+            (
+              filters.ageMax ==
+                null ||
+              patientAge <=
+                filters.ageMax
             )
           ) {
             score += 10;
-            evidence.push("Age");
+
+            evidence.push(
+              "Age",
+            );
           }
 
-          if (
-            (
-              f.heightMin != null ||
-              f.heightMax != null
-            ) &&
-            inRange(
-              Number(
-                patient.heightCm,
-              ),
-              f.heightMin,
-              f.heightMax,
-            )
-          ) {
-            score += 10;
-            evidence.push("Height");
-          }
 
           if (
-            (
-              f.weightMin != null ||
-              f.weightMax != null
-            ) &&
-            inRange(
-              Number(
-                patient.weightKg,
-              ),
-              f.weightMin,
-              f.weightMax,
-            )
-          ) {
-            score += 6;
-            evidence.push("Weight");
-          }
-
-          if (
-            f.bloodGroup &&
+            filters.bloodGroup &&
             patient.bloodGroup ===
-              f.bloodGroup
+              filters.bloodGroup
           ) {
             score += 12;
+
             evidence.push(
               "Blood group",
             );
           }
 
+
           if (
-            f.gender &&
+            filters.gender &&
             patient.gender ===
-              f.gender
+              filters.gender
           ) {
             score += 7;
+
             evidence.push(
-              "Gender/sex",
+              "Gender",
             );
           }
 
-          if (
-            f.province &&
-            patient.province ===
-              f.province
-          ) {
-            score += 6;
-            evidence.push(
-              "Province",
-            );
-          }
 
           if (
-            f.district &&
-            patient.district ===
-              f.district
-          ) {
-            score += 6;
-            evidence.push(
-              "District",
-            );
-          }
-
-          if (
-            f.name &&
-            `${patient.firstName} ${patient.lastName} ${patient.patientNumber}`
+            filters.name &&
+            `
+              ${patient.firstName}
+              ${patient.lastName}
+              ${patient.patientNumber}
+            `
               .toLowerCase()
               .includes(
-                f.name.toLowerCase(),
+                filters.name
+                  .toLowerCase(),
               )
           ) {
             score += 12;
+
             evidence.push(
-              "Name clue",
+              "Name",
             );
           }
 
-          if (
-            f.phoneDigits &&
-            patient.phone.endsWith(
-              f.phoneDigits,
-            )
-          ) {
-            score += 10;
-            evidence.push(
-              "Phone digits",
-            );
-          }
 
           if (
-            f.workplace &&
+            filters.workplace &&
             patient.workplace
               .toLowerCase()
               .includes(
-                f.workplace.toLowerCase(),
+                filters.workplace
+                  .toLowerCase(),
               )
           ) {
             score += 8;
+
             evidence.push(
               "Workplace",
             );
           }
 
-          if (
-            f.procedure &&
-            clinicalText.includes(
-              f.procedure.toLowerCase(),
-            )
-          ) {
-            score += 18;
-            evidence.push(
+
+          const clues = [
+            [
+              filters.procedure,
+              18,
               "Procedure",
-            );
-          }
+            ],
 
-          if (
-            f.implant &&
-            clinicalText.includes(
-              f.implant.toLowerCase(),
-            )
-          ) {
-            score += 18;
-            evidence.push(
+            [
+              filters.implant,
+              18,
               "Implant/device",
-            );
-          }
+            ],
 
-          if (
-            f.finding &&
-            clinicalText.includes(
-              f.finding.toLowerCase(),
-            )
-          ) {
-            score += 15;
-            evidence.push(
+            [
+              filters.finding,
+              15,
               "Clinical finding",
-            );
-          }
+            ],
 
-          if (
-            f.bodyRegion &&
-            clinicalText.includes(
-              f.bodyRegion.toLowerCase(),
-            )
-          ) {
-            score += 12;
-            evidence.push(
+            [
+              filters.bodyRegion,
+              12,
               "Body region",
-            );
-          }
+            ],
 
-          if (
-            f.missingBodyPart &&
-            clinicalText.includes(
-              f.missingBodyPart.toLowerCase(),
-            )
-          ) {
-            score += 15;
-            evidence.push(
-              "Missing body part",
-            );
-          }
-
-          if (
-            f.scar &&
-            clinicalText.includes(
-              f.scar.toLowerCase(),
-            )
-          ) {
-            score += 15;
-            evidence.push(
+            [
+              filters.scar,
+              15,
               "Scar",
-            );
-          }
+            ],
 
-          if (
-            f.birthmark &&
-            clinicalText.includes(
-              f.birthmark.toLowerCase(),
-            )
-          ) {
-            score += 12;
-            evidence.push(
+            [
+              filters.birthmark,
+              12,
               "Birthmark",
-            );
-          }
+            ],
 
-          if (
-            f.tattoo &&
-            clinicalText.includes(
-              f.tattoo.toLowerCase(),
-            )
-          ) {
-            score += 10;
-            evidence.push(
+            [
+              filters.tattoo,
+              10,
               "Tattoo",
-            );
+            ],
+
+            [
+              filters.missingBodyPart,
+              15,
+              "Missing body part",
+            ],
+
+            [
+              filters.fracture,
+              15,
+              "Fracture",
+            ],
+          ] as Array<
+            [
+              string |
+                undefined,
+
+              number,
+
+              string,
+            ]
+          >;
+
+
+          for (
+            const [
+              clue,
+              weight,
+              label,
+            ] of clues
+          ) {
+            if (
+              clue &&
+              clinicalText.includes(
+                clue.toLowerCase(),
+              )
+            ) {
+              score +=
+                weight;
+
+              evidence.push(
+                label,
+              );
+            }
           }
 
+
           if (
-            f.fracture &&
-            clinicalText.includes(
-              f.fracture.toLowerCase(),
+            filters.hasSurgery &&
+            !records.some(
+              (
+                record,
+              ) =>
+                record.type ===
+                "SURGERY",
             )
           ) {
-            score += 15;
-            evidence.push(
-              "Old fracture",
-            );
+            score =
+              0;
           }
+
 
           return {
             patient,
+
             score,
+
             evidence,
+
             records,
           };
         },
       )
       .filter(
         (
-          result: {
-            patient: Patient;
-            score: number;
-            evidence: string[];
-            records: TreatmentRecord[];
-          },
-        ) => result.score > 0,
+          item,
+        ) =>
+          item.score >
+          0,
       )
       .sort(
         (
-          a: { score: number },
-          b: { score: number },
+          a,
+          b,
         ) =>
-          b.score - a.score,
+          b.score -
+          a.score,
       );
   }
 
+
+  /*
+   * Initial load.
+   */
   onMounted(() => {
     void refresh();
   });
 
+
   return {
     patients,
+
     treatments,
+
     wards,
+
     emergencies,
 
     loading,
+
     loadError,
 
     patientById,
+
     treatmentsForPatient,
 
     addPatient,
+
+    updatePatient,
+
     addTreatment,
+
     addWard,
+
     assignBed,
+
     addEmergency,
 
     searchECIS,
+
     refresh,
   };
 }

@@ -1,466 +1,833 @@
-const pool = require('../config/database');
+const pool = require("../config/database");
 
-/**
- * Create a new patient
- */
-async function createPatient(patientData) {
-  const {
-    hospitalId,
-    patientNumber,
-    nicNumber,
-    passportNumber,
-    firstName,
-    middleName,
-    lastName,
-    dateOfBirth,
-    gender,
-    bloodGroup,
-    heightCm,
-    weightKg,
-    nationality,
-    primaryPhone,
-    secondaryPhone,
-    email,
-    occupation,
-    status,
-  } = patientData;
+/* ============================================================
+   HELPERS
+   ============================================================ */
 
-  const query = `
-    INSERT INTO patients (
-      hospital_id,
-      patient_number,
-      nic_number,
-      passport_number,
-      first_name,
-      middle_name,
-      last_name,
-      date_of_birth,
-      gender,
-      blood_group,
-      height_cm,
-      weight_kg,
-      nationality,
-      primary_phone,
-      secondary_phone,
-      email,
-      occupation,
-      status
-    )
-    VALUES (
-      $1,
-      $2,
-      $3,
-      $4,
-      $5,
-      $6,
-      $7,
-      $8,
-      $9,
-      $10,
-      $11,
-      $12,
-      $13,
-      $14,
-      $15,
-      $16,
-      $17,
-      $18
-    )
-    RETURNING
-      patient_id,
-      hospital_id,
-      patient_number,
-      nic_number,
-      passport_number,
-      first_name,
-      middle_name,
-      last_name,
-      date_of_birth,
-      gender,
-      blood_group,
-      height_cm,
-      weight_kg,
-      nationality,
-      primary_phone,
-      secondary_phone,
-      email,
-      occupation,
-      status,
-      registered_at,
-      created_at,
-      updated_at;
-  `;
+function cleanString(value) {
+  if (value === undefined || value === null) {
+    return null;
+  }
 
-  const values = [
-    hospitalId,
-    patientNumber,
-    nicNumber || null,
-    passportNumber || null,
-    firstName,
-    middleName || null,
-    lastName || null,
-    dateOfBirth || null,
-    gender || null,
-    bloodGroup || null,
-    heightCm ?? null,
-    weightKg ?? null,
-    nationality || null,
-    primaryPhone || null,
-    secondaryPhone || null,
-    email || null,
-    occupation || null,
-    status || 'ACTIVE',
-  ];
+  const valueString = String(value).trim();
 
-  const result = await pool.query(query, values);
-
-  return result.rows[0];
+  return valueString ? valueString : null;
 }
 
+function cleanArray(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
 
-/**
- * Get all patients
- */
-async function getAllPatients() {
-  const query = `
-    SELECT
-      p.patient_id,
-      p.patient_number,
-      p.first_name,
-      p.middle_name,
-      p.last_name,
-      p.date_of_birth,
-      p.gender,
-      p.blood_group,
-      p.height_cm,
-      p.weight_kg,
-      p.primary_phone,
-      p.email,
-      p.occupation,
-      p.status,
-      p.registered_at,
+  return [
+    ...new Set(value.map((item) => String(item ?? "").trim()).filter(Boolean)),
+  ];
+}
 
-      h.hospital_id,
-      h.hospital_code,
-      h.hospital_name
+/* ============================================================
+   PATIENT NUMBER
+   ============================================================ */
 
-    FROM patients p
+async function generatePatientNumber(client) {
+  const result = await client.query(`
+      SELECT
+        COALESCE(
+          MAX(
+            CASE
+              WHEN patient_number ~ '^P[0-9]+$'
+              THEN CAST(
+                SUBSTRING(
+                  patient_number
+                  FROM 2
+                ) AS INTEGER
+              )
+              ELSE 0
+            END
+          ),
+          0
+        ) + 1 AS next_number
+      FROM public.patients;
+    `);
 
-    INNER JOIN hospitals h
-      ON p.hospital_id = h.hospital_id
+  const nextNumber = Number(result.rows[0].next_number);
 
-    ORDER BY p.created_at DESC;
-  `;
+  return `P${String(nextNumber).padStart(6, "0")}`;
+}
 
-  const result = await pool.query(query);
+/* ============================================================
+   INSERT ALLERGIES
+   ============================================================ */
+
+async function saveAllergies(client, patientId, allergyNames, category) {
+  const names = cleanArray(allergyNames);
+
+  for (const allergyName of names) {
+    const allergyResult = await client.query(
+      `
+          INSERT INTO public.allergies (
+            allergy_name,
+            allergy_category
+          )
+          VALUES ($1, $2)
+
+          ON CONFLICT (
+            allergy_name,
+            allergy_category
+          )
+
+          DO UPDATE
+          SET allergy_name =
+              EXCLUDED.allergy_name
+
+          RETURNING allergy_id;
+        `,
+      [allergyName, category],
+    );
+
+    const allergyId = allergyResult.rows[0].allergy_id;
+
+    await client.query(
+      `
+        INSERT INTO public.patient_allergies (
+          patient_id,
+          allergy_id
+        )
+        VALUES ($1, $2)
+
+        ON CONFLICT (
+          patient_id,
+          allergy_id
+        )
+
+        DO NOTHING;
+      `,
+      [patientId, allergyId],
+    );
+  }
+}
+
+/* ============================================================
+   CREATE PATIENT
+   ============================================================ */
+
+async function createPatient(data) {
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const hospitalId = data.hospitalId;
+
+    if (!hospitalId) {
+      throw new Error("Hospital ID is required.");
+    }
+
+    /* --------------------------------------------------------
+       Verify hospital
+       -------------------------------------------------------- */
+
+    const hospital = await client.query(
+      `
+          SELECT hospital_id
+          FROM public.hospitals
+          WHERE hospital_id = $1;
+        `,
+      [hospitalId],
+    );
+
+    if (hospital.rowCount === 0) {
+      throw new Error("Hospital not found.");
+    }
+
+    /* --------------------------------------------------------
+       Generate patient number
+       -------------------------------------------------------- */
+
+    const patientNumber = await generatePatientNumber(client);
+
+    /* --------------------------------------------------------
+       Insert patient
+       -------------------------------------------------------- */
+
+    const patientResult = await client.query(
+      `
+          INSERT INTO public.patients (
+            hospital_id,
+            patient_number,
+
+            nic_number,
+            passport_number,
+
+            first_name,
+            middle_name,
+            last_name,
+
+            date_of_birth,
+            gender,
+            blood_group,
+
+            height_cm,
+            weight_kg,
+
+            nationality,
+
+            primary_phone,
+            secondary_phone,
+
+            email,
+            occupation,
+
+            address,
+            province,
+            district,
+
+            registration_notes,
+
+            status
+          )
+
+          VALUES (
+            $1,
+            $2,
+
+            $3,
+            $4,
+
+            $5,
+            $6,
+            $7,
+
+            $8,
+            $9,
+            $10,
+
+            $11,
+            $12,
+
+            $13,
+
+            $14,
+            $15,
+
+            $16,
+            $17,
+
+            $18,
+            $19,
+            $20,
+
+            $21,
+
+            $22
+          )
+
+          RETURNING patient_id;
+        `,
+      [
+        hospitalId,
+        patientNumber,
+
+        cleanString(data.nicNumber),
+
+        cleanString(data.passportNumber),
+
+        cleanString(data.firstName),
+
+        cleanString(data.middleName),
+
+        cleanString(data.lastName),
+
+        data.dateOfBirth || null,
+
+        cleanString(data.gender),
+
+        cleanString(data.bloodGroup),
+
+        data.heightCm !== undefined &&
+        data.heightCm !== null &&
+        data.heightCm !== ""
+          ? Number(data.heightCm)
+          : null,
+
+        data.weightKg !== undefined &&
+        data.weightKg !== null &&
+        data.weightKg !== ""
+          ? Number(data.weightKg)
+          : null,
+
+        cleanString(data.nationality) || "Sri Lankan",
+
+        cleanString(data.primaryPhone),
+
+        cleanString(data.secondaryPhone),
+
+        cleanString(data.email),
+
+        cleanString(data.occupation),
+
+        cleanString(data.address),
+
+        cleanString(data.province),
+
+        cleanString(data.district),
+
+        cleanString(data.registrationNotes),
+
+        cleanString(data.status) || "ACTIVE",
+      ],
+    );
+
+    const patientId = patientResult.rows[0].patient_id;
+
+    /* --------------------------------------------------------
+       Food allergies
+       -------------------------------------------------------- */
+
+    await saveAllergies(client, patientId, data.foodAllergies, "FOOD");
+
+    /* --------------------------------------------------------
+       Medical / drug allergies
+       -------------------------------------------------------- */
+
+    await saveAllergies(
+      client,
+      patientId,
+      data.medicalAllergies,
+      "MEDICAL_DRUG",
+    );
+
+    await client.query("COMMIT");
+
+    /*
+     * IMPORTANT:
+     * Return the actual complete database record.
+     */
+    return await getPatientById(patientId);
+  } catch (error) {
+    await client.query("ROLLBACK");
+
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/* ============================================================
+   GET PATIENT BY ID
+   ============================================================ */
+
+async function getPatientById(patientId) {
+  const result = await pool.query(
+    `
+        SELECT
+          p.patient_id,
+          p.hospital_id,
+
+          p.patient_number,
+
+          p.nic_number,
+          p.passport_number,
+
+          p.first_name,
+          p.middle_name,
+          p.last_name,
+
+          p.date_of_birth,
+          p.gender,
+          p.blood_group,
+
+          p.height_cm,
+          p.weight_kg,
+
+          p.nationality,
+
+          p.primary_phone,
+          p.secondary_phone,
+
+          p.email,
+          p.occupation,
+
+          p.address,
+          p.province,
+          p.district,
+
+          p.registration_notes,
+
+          p.status,
+
+          p.registered_at,
+          p.created_at,
+          p.updated_at,
+
+          h.hospital_code,
+          h.hospital_name,
+
+          COALESCE(
+            (
+              SELECT jsonb_agg(
+                jsonb_build_object(
+                  'id',
+                  a.allergy_id,
+
+                  'name',
+                  a.allergy_name,
+
+                  'category',
+                  a.allergy_category,
+
+                  'reaction',
+                  pa.reaction,
+
+                  'notes',
+                  pa.notes
+                )
+
+                ORDER BY
+                  a.allergy_category,
+                  a.allergy_name
+              )
+
+              FROM public.patient_allergies pa
+
+              INNER JOIN public.allergies a
+                ON a.allergy_id =
+                   pa.allergy_id
+
+              WHERE
+                pa.patient_id =
+                  p.patient_id
+            ),
+
+            '[]'::jsonb
+          ) AS allergies
+
+        FROM public.patients p
+
+        INNER JOIN public.hospitals h
+          ON h.hospital_id =
+             p.hospital_id
+
+        WHERE
+          p.patient_id = $1;
+      `,
+    [patientId],
+  );
+
+  return result.rows[0] || null;
+}
+
+/* ============================================================
+   GET ALL PATIENTS
+   ============================================================ */
+
+async function getAllPatients(hospitalId) {
+  const result = await pool.query(
+    `
+        SELECT
+          p.patient_id,
+          p.hospital_id,
+
+          p.patient_number,
+
+          p.nic_number,
+          p.passport_number,
+
+          p.first_name,
+          p.middle_name,
+          p.last_name,
+
+          p.date_of_birth,
+          p.gender,
+          p.blood_group,
+
+          p.height_cm,
+          p.weight_kg,
+
+          p.nationality,
+
+          p.primary_phone,
+          p.secondary_phone,
+
+          p.email,
+          p.occupation,
+
+          p.address,
+          p.province,
+          p.district,
+
+          p.registration_notes,
+
+          p.status,
+
+          p.registered_at,
+          p.created_at,
+          p.updated_at,
+
+          h.hospital_code,
+          h.hospital_name,
+
+          COALESCE(
+            (
+              SELECT jsonb_agg(
+                jsonb_build_object(
+                  'id',
+                  a.allergy_id,
+
+                  'name',
+                  a.allergy_name,
+
+                  'category',
+                  a.allergy_category
+                )
+
+                ORDER BY
+                  a.allergy_category,
+                  a.allergy_name
+              )
+
+              FROM public.patient_allergies pa
+
+              INNER JOIN public.allergies a
+                ON a.allergy_id =
+                   pa.allergy_id
+
+              WHERE
+                pa.patient_id =
+                  p.patient_id
+            ),
+
+            '[]'::jsonb
+          ) AS allergies
+
+        FROM public.patients p
+
+        INNER JOIN public.hospitals h
+          ON h.hospital_id =
+             p.hospital_id
+
+        WHERE
+          p.hospital_id = $1
+
+        ORDER BY
+          p.created_at DESC;
+      `,
+    [hospitalId],
+  );
 
   return result.rows;
 }
 
+/* ============================================================
+   SEARCH PATIENTS
+   ============================================================ */
 
-/**
- * Get one patient using patient number
- */
-async function getPatientByNumber(patientNumber) {
-  const query = `
-    SELECT
-      p.patient_id,
-      p.hospital_id,
-      p.patient_number,
+async function searchPatients(hospitalId, searchTerm) {
+  const result = await pool.query(
+    `
+        SELECT
+          p.patient_id,
+          p.hospital_id,
 
-      p.nic_number,
-      p.passport_number,
+          p.patient_number,
 
-      p.first_name,
-      p.middle_name,
-      p.last_name,
+          p.nic_number,
 
-      p.date_of_birth,
-      p.gender,
+          p.first_name,
+          p.middle_name,
+          p.last_name,
 
-      p.blood_group,
+          p.date_of_birth,
+          p.gender,
+          p.blood_group,
 
-      p.height_cm,
-      p.weight_kg,
+          p.height_cm,
+          p.weight_kg,
 
-      p.nationality,
+          p.primary_phone,
 
-      p.primary_phone,
-      p.secondary_phone,
+          p.address,
+          p.province,
+          p.district,
 
-      p.email,
-      p.occupation,
+          p.occupation,
 
-      p.status,
+          p.status,
 
-      p.registered_at,
-      p.created_at,
-      p.updated_at,
+          h.hospital_code,
+          h.hospital_name
 
-      h.hospital_code,
-      h.hospital_name,
-      h.hospital_type,
-      h.province,
-      h.district,
-      h.address AS hospital_address,
-      h.phone AS hospital_phone,
-      h.email AS hospital_email
+        FROM public.patients p
 
-    FROM patients p
+        INNER JOIN public.hospitals h
+          ON h.hospital_id =
+             p.hospital_id
 
-    INNER JOIN hospitals h
-      ON p.hospital_id = h.hospital_id
+        WHERE
+          p.hospital_id = $1
 
-    WHERE p.patient_number = $1;
-  `;
+          AND (
+            p.patient_number ILIKE $2
+            OR p.first_name ILIKE $2
+            OR p.middle_name ILIKE $2
+            OR p.last_name ILIKE $2
+            OR p.nic_number ILIKE $2
+            OR p.primary_phone ILIKE $2
+          )
 
-  const result = await pool.query(query, [patientNumber]);
+        ORDER BY
+          p.first_name,
+          p.last_name
 
-  return result.rows[0] || null;
-}
-
-
-/**
- * Search patients
- *
- * Searches the existing patient records using:
- * patient number, name, NIC and phone.
- */
-async function searchPatients(searchTerm) {
-  const query = `
-    SELECT
-      p.patient_id,
-      p.patient_number,
-
-      p.first_name,
-      p.middle_name,
-      p.last_name,
-
-      p.date_of_birth,
-      p.gender,
-
-      p.blood_group,
-
-      p.height_cm,
-      p.weight_kg,
-
-      p.primary_phone,
-      p.nic_number,
-
-      p.status,
-
-      h.hospital_id,
-      h.hospital_code,
-      h.hospital_name
-
-    FROM patients p
-
-    INNER JOIN hospitals h
-      ON p.hospital_id = h.hospital_id
-
-    WHERE
-      p.patient_number ILIKE $1
-      OR p.first_name ILIKE $1
-      OR p.middle_name ILIKE $1
-      OR p.last_name ILIKE $1
-      OR p.nic_number ILIKE $1
-      OR p.primary_phone ILIKE $1
-
-    ORDER BY
-      p.first_name ASC,
-      p.last_name ASC
-
-    LIMIT 20;
-  `;
-
-  const values = [`%${searchTerm}%`];
-
-  const result = await pool.query(query, values);
+        LIMIT 20;
+      `,
+    [hospitalId, `%${searchTerm}%`],
+  );
 
   return result.rows;
 }
 
+/* ============================================================
+   UPDATE PATIENT
+   ============================================================ */
 
-/**
- * Get patient profile/history foundation
- *
- * At this stage this returns the central patient
- * and hospital information.
- *
- * Later we will extend this with:
- * OPD
- * Clinics
- * Admissions
- * Treatments
- * Investigations
- * Surgeries
- * Procedures
- * Fractures
- * Dental records
- * Medical devices
- */
-async function getPatientHistory(patientNumber) {
-  const query = `
-    SELECT
-      p.patient_id,
-      p.hospital_id,
-      p.patient_number,
+async function updatePatient(patientId, data) {
+  const client = await pool.connect();
 
-      p.nic_number,
-      p.passport_number,
+  try {
+    await client.query("BEGIN");
 
-      p.first_name,
-      p.middle_name,
-      p.last_name,
+    const current = await client.query(
+      `
+          SELECT
+            patient_id
+          FROM public.patients
+          WHERE patient_id = $1;
+        `,
+      [patientId],
+    );
 
-      p.date_of_birth,
-      p.gender,
+    if (current.rowCount === 0) {
+      await client.query("ROLLBACK");
 
-      p.blood_group,
+      return null;
+    }
 
-      p.height_cm,
-      p.weight_kg,
+    const updated = await client.query(
+      `
+          UPDATE public.patients
 
-      p.nationality,
+          SET
+            first_name =
+              COALESCE(
+                $1,
+                first_name
+              ),
 
-      p.primary_phone,
-      p.secondary_phone,
+            middle_name =
+              COALESCE(
+                $2,
+                middle_name
+              ),
 
-      p.email,
-      p.occupation,
+            last_name =
+              COALESCE(
+                $3,
+                last_name
+              ),
 
-      p.status,
+            date_of_birth =
+              COALESCE(
+                $4,
+                date_of_birth
+              ),
 
-      p.registered_at,
-      p.created_at,
-      p.updated_at,
+            gender =
+              COALESCE(
+                $5,
+                gender
+              ),
 
-      h.hospital_id AS hospital_reference_id,
-      h.hospital_code,
-      h.hospital_name,
-      h.hospital_type,
-      h.province,
-      h.district,
-      h.address AS hospital_address,
-      h.phone AS hospital_phone,
-      h.email AS hospital_email
+            blood_group =
+              COALESCE(
+                $6,
+                blood_group
+              ),
 
-    FROM patients p
+            height_cm =
+              COALESCE(
+                $7,
+                height_cm
+              ),
 
-    INNER JOIN hospitals h
-      ON p.hospital_id = h.hospital_id
+            weight_kg =
+              COALESCE(
+                $8,
+                weight_kg
+              ),
 
-    WHERE p.patient_number = $1;
-  `;
+            nationality =
+              COALESCE(
+                $9,
+                nationality
+              ),
 
-  const result = await pool.query(query, [patientNumber]);
+            primary_phone =
+              COALESCE(
+                $10,
+                primary_phone
+              ),
 
-  return result.rows[0] || null;
+            secondary_phone =
+              COALESCE(
+                $11,
+                secondary_phone
+              ),
+
+            email =
+              COALESCE(
+                $12,
+                email
+              ),
+
+            occupation =
+              COALESCE(
+                $13,
+                occupation
+              ),
+
+            address =
+              COALESCE(
+                $14,
+                address
+              ),
+
+            province =
+              COALESCE(
+                $15,
+                province
+              ),
+
+            district =
+              COALESCE(
+                $16,
+                district
+              ),
+
+            registration_notes =
+              COALESCE(
+                $17,
+                registration_notes
+              ),
+
+            status =
+              COALESCE(
+                $18,
+                status
+              ),
+
+            updated_at =
+              CURRENT_TIMESTAMP
+
+          WHERE
+            patient_id = $19
+
+          RETURNING
+            patient_id;
+        `,
+      [
+        cleanString(data.firstName),
+
+        cleanString(data.middleName),
+
+        cleanString(data.lastName),
+
+        data.dateOfBirth || null,
+
+        cleanString(data.gender),
+
+        cleanString(data.bloodGroup),
+
+        data.heightCm !== undefined ? Number(data.heightCm) : null,
+
+        data.weightKg !== undefined ? Number(data.weightKg) : null,
+
+        cleanString(data.nationality),
+
+        cleanString(data.primaryPhone),
+
+        cleanString(data.secondaryPhone),
+
+        cleanString(data.email),
+
+        cleanString(data.occupation),
+
+        cleanString(data.address),
+
+        cleanString(data.province),
+
+        cleanString(data.district),
+
+        cleanString(data.registrationNotes),
+
+        cleanString(data.status),
+
+        patientId,
+      ],
+    );
+
+    if (updated.rowCount === 0) {
+      await client.query("ROLLBACK");
+
+      return null;
+    }
+
+    /*
+     * Replace allergy relationships only
+     * when allergy arrays are supplied.
+     */
+
+    if (
+      Array.isArray(data.foodAllergies) ||
+      Array.isArray(data.medicalAllergies)
+    ) {
+      await client.query(
+        `
+          DELETE FROM public.patient_allergies
+          WHERE patient_id = $1;
+        `,
+        [patientId],
+      );
+
+      await saveAllergies(client, patientId, data.foodAllergies || [], "FOOD");
+
+      await saveAllergies(
+        client,
+        patientId,
+        data.medicalAllergies || [],
+        "MEDICAL_DRUG",
+      );
+    }
+
+    await client.query("COMMIT");
+
+    return await getPatientById(patientId);
+  } catch (error) {
+    await client.query("ROLLBACK");
+
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
-
-/**
- * Update patient
- */
-async function updatePatient(patientNumber, patientData) {
-  const {
-    firstName,
-    middleName,
-    lastName,
-    dateOfBirth,
-    gender,
-    bloodGroup,
-    heightCm,
-    weightKg,
-    nationality,
-    primaryPhone,
-    secondaryPhone,
-    email,
-    occupation,
-    status,
-  } = patientData;
-
-  const query = `
-    UPDATE patients
-    SET
-      first_name = COALESCE($1, first_name),
-      middle_name = COALESCE($2, middle_name),
-      last_name = COALESCE($3, last_name),
-      date_of_birth = COALESCE($4, date_of_birth),
-      gender = COALESCE($5, gender),
-      blood_group = COALESCE($6, blood_group),
-      height_cm = COALESCE($7, height_cm),
-      weight_kg = COALESCE($8, weight_kg),
-      nationality = COALESCE($9, nationality),
-      primary_phone = COALESCE($10, primary_phone),
-      secondary_phone = COALESCE($11, secondary_phone),
-      email = COALESCE($12, email),
-      occupation = COALESCE($13, occupation),
-      status = COALESCE($14, status),
-      updated_at = CURRENT_TIMESTAMP
-
-    WHERE patient_number = $15
-
-    RETURNING
-      patient_id,
-      hospital_id,
-      patient_number,
-      nic_number,
-      passport_number,
-      first_name,
-      middle_name,
-      last_name,
-      date_of_birth,
-      gender,
-      blood_group,
-      height_cm,
-      weight_kg,
-      nationality,
-      primary_phone,
-      secondary_phone,
-      email,
-      occupation,
-      status,
-      registered_at,
-      created_at,
-      updated_at;
-  `;
-
-  const values = [
-    firstName ?? null,
-    middleName ?? null,
-    lastName ?? null,
-    dateOfBirth ?? null,
-    gender ?? null,
-    bloodGroup ?? null,
-    heightCm ?? null,
-    weightKg ?? null,
-    nationality ?? null,
-    primaryPhone ?? null,
-    secondaryPhone ?? null,
-    email ?? null,
-    occupation ?? null,
-    status ?? null,
-    patientNumber,
-  ];
-
-  const result = await pool.query(query, values);
-
-  return result.rows[0] || null;
-}
-
-
-/**
- * Export all patient service functions
- *
- * IMPORTANT:
- * The controller depends on these names.
- */
 module.exports = {
   createPatient,
+
+  getPatientById,
+
   getAllPatients,
-  getPatientByNumber,
-  updatePatient,
+
   searchPatients,
-  getPatientHistory,
+
+  updatePatient,
 };

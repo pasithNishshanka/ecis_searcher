@@ -1,91 +1,106 @@
 const patientService = require("../services/patient.service");
 
+/* ============================================================
+   CREATE
+   ============================================================ */
 
 async function createPatient(req, res, next) {
   try {
-    const { hospitalId, patientNumber, firstName, heightCm, weightKg } =
-      req.body;
+    const hospitalId = req.user?.hospitalId;
 
     if (!hospitalId) {
-      return res.status(400).json({
+      return res.status(401).json({
         success: false,
-        message: "hospitalId is required",
+
+        message: "Authenticated hospital information is missing.",
       });
     }
 
-    if (!patientNumber || !patientNumber.trim()) {
+    if (!req.body?.firstName || !String(req.body.firstName).trim()) {
       return res.status(400).json({
         success: false,
-        message: "patientNumber is required",
+
+        message: "First name is required.",
       });
     }
 
-    if (!firstName || !firstName.trim()) {
+    if (!req.body?.dateOfBirth) {
       return res.status(400).json({
         success: false,
-        message: "firstName is required",
+
+        message: "Date of birth is required.",
       });
     }
 
-    if (heightCm !== undefined && heightCm !== null) {
-      if (Number.isNaN(Number(heightCm)) || Number(heightCm) <= 0) {
-        return res.status(400).json({
-          success: false,
-          message: "heightCm must be a positive number",
-        });
-      }
-    }
+    const patient = await patientService.createPatient({
+      ...req.body,
 
-    if (weightKg !== undefined && weightKg !== null) {
-      if (Number.isNaN(Number(weightKg)) || Number(weightKg) <= 0) {
-        return res.status(400).json({
-          success: false,
-          message: "weightKg must be a positive number",
-        });
-      }
-    }
-
-    const patient = await patientService.createPatient(req.body);
+      hospitalId,
+    });
 
     return res.status(201).json({
       success: true,
-      message: "Patient registered successfully",
+
+      message: "Patient registered successfully.",
+
       data: patient,
     });
   } catch (error) {
+    console.error("CREATE PATIENT:", error);
+
     next(error);
   }
 }
+
+/* ============================================================
+   GET ALL
+   ============================================================ */
 
 async function getAllPatients(req, res, next) {
   try {
-    const patients = await patientService.getAllPatients();
+    const patients = await patientService.getAllPatients(req.user.hospitalId);
 
     return res.status(200).json({
       success: true,
+
       count: patients.length,
+
       data: patients,
     });
   } catch (error) {
+    console.error("GET PATIENTS:", error);
+
     next(error);
   }
 }
 
-async function getPatientByNumber(req, res, next) {
-  try {
-    const { patientNumber } = req.params;
+/* ============================================================
+   GET BY ID
+   ============================================================ */
 
-    const patient = await patientService.getPatientByNumber(patientNumber);
+async function getPatientById(req, res, next) {
+  try {
+    const patient = await patientService.getPatientById(req.params.patientId);
 
     if (!patient) {
       return res.status(404).json({
         success: false,
-        message: "Patient not found",
+
+        message: "Patient not found.",
+      });
+    }
+
+    if (Number(patient.hospital_id) !== Number(req.user.hospitalId)) {
+      return res.status(403).json({
+        success: false,
+
+        message: "Patient does not belong to your hospital.",
       });
     }
 
     return res.status(200).json({
       success: true,
+
       data: patient,
     });
   } catch (error) {
@@ -93,45 +108,33 @@ async function getPatientByNumber(req, res, next) {
   }
 }
 
-async function updatePatient(req, res, next) {
-  try {
-    const { patientNumber } = req.params;
-
-    const patient = await patientService.updatePatient(patientNumber, req.body);
-
-    if (!patient) {
-      return res.status(404).json({
-        success: false,
-        message: "Patient not found",
-      });
-    }
-
-    return res.status(200).json({
-      success: true,
-      message: "Patient updated successfully",
-      data: patient,
-    });
-  } catch (error) {
-    next(error);
-  }
-}
+/* ============================================================
+   SEARCH
+   ============================================================ */
 
 async function searchPatients(req, res, next) {
   try {
-    const { q } = req.query;
+    const searchTerm = String(req.query.q || "").trim();
 
-    if (!q || !q.trim()) {
+    if (!searchTerm) {
       return res.status(400).json({
         success: false,
-        message: 'Search query is required',
+
+        message: "Search query is required.",
       });
     }
 
-    const patients = await patientService.searchPatients(q.trim());
+    const patients = await patientService.searchPatients(
+      req.user.hospitalId,
+
+      searchTerm,
+    );
 
     return res.status(200).json({
       success: true,
+
       count: patients.length,
+
       data: patients,
     });
   } catch (error) {
@@ -139,40 +142,56 @@ async function searchPatients(req, res, next) {
   }
 }
 
+/* ============================================================
+   UPDATE
+   ============================================================ */
 
-async function getPatientHistory(req, res, next) {
+async function updatePatient(req, res, next) {
   try {
-    const { patientNumber } = req.params;
-
-    const patient = await patientService.getPatientHistory(
-      patientNumber
-    );
+    const patient = await patientService.getPatientById(req.params.patientId);
 
     if (!patient) {
       return res.status(404).json({
         success: false,
-        message: 'Patient not found',
+
+        message: "Patient not found.",
       });
     }
 
+    if (Number(patient.hospital_id) !== Number(req.user.hospitalId)) {
+      return res.status(403).json({
+        success: false,
+
+        message: "Patient does not belong to your hospital.",
+      });
+    }
+
+    const updated = await patientService.updatePatient(
+      req.params.patientId,
+
+      req.body,
+    );
+
     return res.status(200).json({
       success: true,
-      data: {
-        patient,
-      },
+
+      message: "Patient updated successfully.",
+
+      data: updated,
     });
   } catch (error) {
     next(error);
   }
 }
 
-
 module.exports = {
   createPatient,
-  getAllPatients,
-  getPatientByNumber,
-  updatePatient,
-  searchPatients,
-  getPatientHistory,
-};
 
+  getAllPatients,
+
+  getPatientById,
+
+  searchPatients,
+
+  updatePatient,
+};

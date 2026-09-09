@@ -1,33 +1,46 @@
-const express = require('express');
+const express = require("express");
+
+const { authenticate } = require("../middleware/auth.middleware");
 
 const {
   createPatient,
   getAllPatients,
-  getPatientByNumber,
-  updatePatient,
+  getPatientById,
   searchPatients,
-  getPatientHistory,
-} = require('../controllers/patient.controller');
+  updatePatient,
+} = require("../controllers/patient.controller");
 
 const router = express.Router();
 
-// Create patient
-router.post('/', createPatient);
+/*
+ * All patient operations require
+ * authenticated hospital staff.
+ */
+router.use(authenticate);
 
-// Get all patients
-router.get('/', getAllPatients);
+/*
+ * Create
+ */
+router.post("/", createPatient);
 
-// Search patients
-// IMPORTANT: keep this before /:patientNumber
-router.get('/search', searchPatients);
+/*
+ * List
+ */
+router.get("/", getAllPatients);
 
-// Get patient history
-router.get('/:patientNumber/history', getPatientHistory);
+/*
+ * Search
+ */
+router.get("/search", searchPatients);
 
-// Get one patient
-router.get('/:patientNumber', getPatientByNumber);
+/*
+ * Patient ID.
+ *
+ * Keep this after /search so Express does not treat
+ * "search" as a patient identifier.
+ */
+router.get("/:patientId", getPatientById);
 
-// Update patient
-router.put('/:patientNumber', updatePatient);
+router.put("/:patientId", updatePatient);
 
 module.exports = router;

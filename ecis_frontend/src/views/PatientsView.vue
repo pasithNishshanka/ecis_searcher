@@ -1,67 +1,789 @@
 <template>
-<div>
-  <PageHeader eyebrow="Patient registry" title="Patients" description="Register once, then continue adding OPD, ward, surgery and treatment history to the same patient record.">
-    <BaseButton @click="open=true"><template #icon><UserPlus :size="16" /></template>Register patient</BaseButton>
-  </PageHeader>
+  <div>
+    <PageHeader eyebrow="Patient registry" title="Patients"
+      description="Register each patient once and maintain the same permanent EHR throughout their care.">
+      <BaseButton @click="
+        openRegister = true
+        ">
+        <template #icon>
+          <UserPlus :size="16" />
+        </template>
 
-  <SectionCard>
-    <div class="flex flex-col gap-3 sm:flex-row">
-      <BaseInput v-model="q" placeholder="Search name, patient ID or NIC" />
-      <BaseSelect v-model="gender" class="sm:w-44"><option value="">All gender</option><option>Male</option><option>Female</option><option>Other</option></BaseSelect>
-    </div>
-  </SectionCard>
+        Register patient
+      </BaseButton>
+    </PageHeader>
 
-  <div class="card mt-5 overflow-hidden"><div class="overflow-x-auto"><table class="min-w-full text-left text-sm">
-    <thead class="bg-slate-50 text-xs uppercase text-slate-500"><tr><th class="p-4">Patient</th><th class="p-4">DOB / Age</th><th class="p-4">Blood</th><th class="p-4">Height</th><th class="p-4">District</th><th class="p-4"></th></tr></thead>
-    <tbody class="divide-y divide-slate-100">
-      <tr v-for="p in filtered" :key="p.id" class="hover:bg-slate-50">
-        <td class="p-4"><div class="flex gap-3"><div class="avatar">{{p.firstName[0]}}{{p.lastName[0]}}</div><div><b>{{p.firstName}} {{p.lastName}}</b><p class="text-xs text-slate-400">{{p.patientNumber}} · {{p.nic || 'NIC not recorded'}}</p></div></div></td>
-        <td class="p-4">{{p.dateOfBirth}}<p class="text-xs text-slate-400">{{age(p.dateOfBirth)}} years</p></td><td class="p-4 font-bold">{{p.bloodGroup}}</td><td class="p-4">{{p.heightCm}} cm</td><td class="p-4">{{p.district}}</td>
-        <td class="p-4 text-right"><RouterLink :to="`/patients/${p.id}`"><BaseButton variant="secondary" size="sm">Open EHR</BaseButton></RouterLink></td>
-      </tr>
-    </tbody>
-  </table></div></div>
 
-  <Modal :open="open" title="Register new patient" description="Create the permanent patient record first. Clinical history is added later through OPD, clinic, ward and treatment workflows." @close="open=false">
-    <form @submit.prevent="save" class="space-y-5">
-      <FormSection :step="1" title="Basic identity" description="Core information used to create the permanent patient record.">
-        <div class="grid gap-4 sm:grid-cols-2">
-          <FormField label="First name" required><BaseInput v-model="f.firstName" required /></FormField>
-          <FormField label="Last name" required><BaseInput v-model="f.lastName" required /></FormField>
-          <FormField label="NIC"><BaseInput v-model="f.nic" placeholder="e.g. 901234567V" /></FormField>
-          <FormField label="Date of birth" required><BaseInput v-model="f.dateOfBirth" type="date" required /></FormField>
-          <FormField label="Gender"><BaseSelect v-model="f.gender"><option>Male</option><option>Female</option><option>Other</option></BaseSelect></FormField>
-          <FormField label="Blood group"><BaseSelect v-model="f.bloodGroup"><option v-for="x in bloodGroups" :key="x">{{x}}</option></BaseSelect></FormField>
-        </div>
-      </FormSection>
+    <!-- SEARCH -->
 
-      <FormSection :step="2" title="Physical & contact details" description="Demographic clues that may also support later ECIS searches." bordered>
-        <div class="grid gap-4 sm:grid-cols-2">
-          <FormField label="Height (cm)"><BaseInput v-model.number="f.heightCm" type="number" min="1" step="0.1" /></FormField>
-          <FormField label="Weight (kg)"><BaseInput v-model.number="f.weightKg" type="number" min="1" step="0.1" /></FormField>
-          <FormField label="Phone"><BaseInput v-model="f.phone" /></FormField>
-          <FormField label="Email"><BaseInput v-model="f.email" type="email" /></FormField>
-          <FormField label="Province"><BaseSelect v-model="f.province"><option v-for="x in provinces" :key="x">{{x}}</option></BaseSelect></FormField>
-          <FormField label="District"><BaseInput v-model="f.district" /></FormField>
-          <div class="sm:col-span-2"><FormField label="Workplace"><BaseInput v-model="f.workplace" placeholder="Employer or workplace name" /></FormField></div>
-          <div class="sm:col-span-2"><FormField label="Address"><BaseTextarea v-model="f.address" placeholder="Residential address" /></FormField></div>
-        </div>
-      </FormSection>
+    <section class="card p-5">
+      <div class="grid gap-3 md:grid-cols-[1fr_180px]">
+        <BaseInput v-model="search" placeholder="Search name / Patient ID / NIC / phone" />
 
-      <FormSection :step="3" title="Allergy information" description="Keep food and medical/drug allergies separate for safer clinical use." bordered>
-        <div class="grid gap-4 sm:grid-cols-2"><TagInput v-model="f.foodAllergies" label="Food allergies" placeholder="e.g. Peanuts, seafood, milk" /><TagInput v-model="f.medicalAllergies" label="Medical / drug allergies" placeholder="e.g. Penicillin, aspirin" /></div>
-      </FormSection>
+        <BaseSelect v-model="genderFilter">
+          <option value="">
+            All gender
+          </option>
 
-      <div class="flex items-center justify-end gap-2 border-t border-slate-100 pt-4">
-        <BaseButton variant="secondary" type="button" @click="open=false">Cancel</BaseButton>
-        <BaseButton type="submit"><template #icon><UserPlus :size="16" /></template>Register patient</BaseButton>
+          <option value="Male">
+            Male
+          </option>
+
+          <option value="Female">
+            Female
+          </option>
+
+          <option value="Other">
+            Other
+          </option>
+        </BaseSelect>
       </div>
-    </form>
-  </Modal>
-</div>
+    </section>
+
+
+    <!-- PATIENT TABLE -->
+
+    <section class="card mt-6 overflow-hidden">
+      <div class="border-b p-5">
+        <div class="flex items-center justify-between">
+          <div>
+            <h2 class="section-title">
+              Registered patients
+            </h2>
+
+            <p class="muted mt-1">
+              {{ filtered.length }}
+              patient records
+            </p>
+          </div>
+        </div>
+      </div>
+
+
+      <div class="overflow-x-auto">
+        <table class="min-w-full">
+          <thead class="bg-slate-50">
+            <tr>
+              <th class="px-5 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
+                Patient
+              </th>
+
+              <th class="px-5 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
+                DOB
+              </th>
+
+              <th class="px-5 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
+                Blood
+              </th>
+
+              <th class="px-5 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
+                Location
+              </th>
+
+              <th class="px-5 py-3 text-right text-xs font-bold uppercase tracking-wide text-slate-500">
+                Actions
+              </th>
+            </tr>
+          </thead>
+
+
+          <tbody class="divide-y divide-slate-100">
+            <tr v-for="
+patient in filtered
+              " :key="patient.id
+                " class="hover:bg-slate-50">
+              <td class="px-5 py-4">
+                <div class="flex items-center gap-3">
+                  <div class="avatar">
+                    {{
+                      patient
+                        .firstName
+                        ?.charAt(
+                          0,
+                        ) || ""
+                    }}{{
+                      patient
+                        .lastName
+                        ?.charAt(
+                          0,
+                        ) || ""
+                    }}
+                  </div>
+
+
+                  <div>
+                    <p class="font-bold">
+                      {{
+                        patient.firstName
+                      }}
+                      {{
+                        patient.lastName
+                      }}
+                    </p>
+
+                    <p class="text-xs text-slate-400">
+                      {{
+                        patient.patientNumber
+                      }}
+
+                      <span v-if="
+                        patient.nic
+                      ">
+                        ·
+                        {{
+                          patient.nic
+                        }}
+                      </span>
+                    </p>
+                  </div>
+                </div>
+              </td>
+
+
+              <td class="px-5 py-4 text-sm">
+                {{
+                  patient.dateOfBirth ||
+                  "—"
+                }}
+              </td>
+
+
+              <td class="px-5 py-4 text-sm font-bold">
+                {{
+                  patient.bloodGroup ||
+                  "—"
+                }}
+              </td>
+
+
+              <td class="px-5 py-4 text-sm">
+                {{
+                  patient.district ||
+                  "—"
+                }}
+              </td>
+
+
+              <td class="px-5 py-4">
+                <div class="flex justify-end gap-2">
+                  <RouterLink :to="`/patients/${patient.id}`
+                    ">
+                    <BaseButton variant="secondary" size="sm">
+                      Open EHR
+                    </BaseButton>
+                  </RouterLink>
+
+
+                  <BaseButton variant="ghost" size="sm" @click="
+                    startEdit(
+                      patient,
+                    )
+                    ">
+                    Edit
+                  </BaseButton>
+                </div>
+              </td>
+            </tr>
+
+
+            <tr v-if="
+              !filtered.length
+            ">
+              <td colspan="5" class="p-12 text-center text-sm text-slate-400">
+                {{
+                  loading
+                    ? "Loading registered patients..."
+                    : "No patients found."
+                }}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+
+    <!-- REGISTER / EDIT MODAL -->
+
+    <Modal :open="openRegister ||
+      openEdit
+      " :title="editing
+          ? 'Edit patient'
+          : 'Register new patient'
+        " :description="editing
+          ? 'Update the existing permanent patient EHR.'
+          : 'Create the permanent patient record. Later clinical records remain linked to this patient.'
+        " @close="
+        closeModal
+      ">
+      <form class="space-y-5" @submit.prevent="
+        savePatient
+      ">
+        <!-- BASIC -->
+
+        <div class="grid gap-4 sm:grid-cols-2">
+          <FormField label="First name" required>
+            <BaseInput v-model="form.firstName
+              " required />
+          </FormField>
+
+
+          <FormField label="Last name" required>
+            <BaseInput v-model="form.lastName
+              " required />
+          </FormField>
+
+
+          <FormField label="NIC">
+            <BaseInput v-model="form.nic
+              " />
+          </FormField>
+
+
+          <FormField label="Date of birth" required>
+            <BaseInput v-model="form.dateOfBirth
+              " type="date" required />
+          </FormField>
+
+
+          <FormField label="Gender">
+            <BaseSelect v-model="form.gender
+              ">
+              <option>
+                Male
+              </option>
+
+              <option>
+                Female
+              </option>
+
+              <option>
+                Other
+              </option>
+            </BaseSelect>
+          </FormField>
+
+
+          <FormField label="Blood group">
+            <BaseSelect v-model="form.bloodGroup
+              ">
+              <option v-for="
+group in bloodGroups
+                " :key="group
+                  " :value="group
+                  ">
+                {{ group }}
+              </option>
+            </BaseSelect>
+          </FormField>
+
+
+          <FormField label="Height (cm)">
+            <BaseInput v-model.number="form.heightCm
+              " type="number" min="1" />
+          </FormField>
+
+
+          <FormField label="Weight (kg)">
+            <BaseInput v-model.number="form.weightKg
+              " type="number" min="1" />
+          </FormField>
+        </div>
+
+
+        <!-- CONTACT -->
+
+        <div class="grid gap-4 sm:grid-cols-2">
+          <FormField label="Phone">
+            <BaseInput v-model="form.phone
+              " />
+          </FormField>
+
+
+          <FormField label="Email">
+            <BaseInput v-model="form.email
+              " type="email" />
+          </FormField>
+
+
+          <FormField label="Province">
+            <BaseInput v-model="form.province
+              " />
+          </FormField>
+
+
+          <FormField label="District">
+            <BaseInput v-model="form.district
+              " />
+          </FormField>
+
+
+          <FormField label="Workplace">
+            <BaseInput v-model="form.workplace
+              " />
+          </FormField>
+
+
+          <div class="sm:col-span-2">
+            <FormField label="Address">
+              <BaseTextarea v-model="form.address
+                " />
+            </FormField>
+          </div>
+        </div>
+
+
+        <!-- ALLERGIES -->
+
+        <div class="rounded-2xl border border-amber-200 bg-amber-50 p-5">
+          <h3 class="font-bold text-amber-900">
+            Allergy information
+          </h3>
+
+
+          <div class="mt-4 grid gap-5 sm:grid-cols-2">
+            <TagInput v-model="form.foodAllergies
+              " label="Food allergies" placeholder="e.g. peanuts, seafood, milk" />
+
+
+            <TagInput v-model="form.medicalAllergies
+              " label="Medical / drug allergies" placeholder="e.g. penicillin, aspirin" />
+          </div>
+        </div>
+
+
+        <!-- NOTES -->
+
+        <FormField label="Registration notes">
+          <BaseTextarea v-model="form.registrationNotes
+            " placeholder="Add relevant registration notes..." />
+        </FormField>
+
+
+        <div v-if="error" class="rounded-xl bg-red-50 p-4 text-sm text-red-700">
+          {{ error }}
+        </div>
+
+
+        <div class="flex justify-end gap-2 border-t pt-4">
+          <BaseButton type="button" variant="secondary" :disabled="saving
+            " @click="
+              closeModal
+            ">
+            Cancel
+          </BaseButton>
+
+
+          <BaseButton type="submit" :disabled="saving
+            ">
+            {{
+              saving
+                ? "Saving..."
+                : editing
+                  ? "Save changes"
+                  : "Register patient"
+            }}
+          </BaseButton>
+        </div>
+      </form>
+    </Modal>
+  </div>
 </template>
+
+
 <script setup lang="ts">
-import {computed,reactive,ref} from 'vue';import {RouterLink} from 'vue-router';import {UserPlus} from 'lucide-vue-next'
-import PageHeader from '../components/PageHeader.vue';import Modal from '../components/Modal.vue';import TagInput from '../components/TagInput.vue';import BaseButton from '../components/ui/BaseButton.vue';import BaseInput from '../components/ui/BaseInput.vue';import BaseSelect from '../components/ui/BaseSelect.vue';import BaseTextarea from '../components/ui/BaseTextarea.vue';import SectionCard from '../components/ui/SectionCard.vue';import FormField from '../components/forms/FormField.vue';import FormSection from '../components/forms/FormSection.vue';import {useEHR} from '../stores/ehr'
-const {patients,addPatient}=useEHR();const open=ref(false),q=ref(''),gender=ref('');const bloodGroups=['O+','O-','A+','A-','B+','B-','AB+','AB-'];const provinces=['Western Province','Central Province','Southern Province','Northern Province'];const f=reactive<any>({firstName:'',lastName:'',nic:'',dateOfBirth:'',gender:'Male',bloodGroup:'O+',phone:'',email:'',address:'',province:'Western Province',district:'Colombo',heightCm:170,weightKg:70,allergies:[],foodAllergies:[],medicalAllergies:[],chronicDiseases:[],workplace:''});const filtered=computed(()=>patients.value.filter(p=>`${p.firstName} ${p.lastName} ${p.patientNumber} ${p.nic}`.toLowerCase().includes(q.value.toLowerCase())&&(!gender.value||p.gender===gender.value)));function age(d:string){return Math.floor((Date.now()-new Date(d).getTime())/31557600000)}function save(){addPatient({...f,allergies:[...f.foodAllergies,...f.medicalAllergies]});open.value=false;Object.assign(f,{firstName:'',lastName:'',nic:'',dateOfBirth:'',phone:'',email:'',address:'',district:'Colombo',workplace:'',foodAllergies:[],medicalAllergies:[],allergies:[]});alert('Patient registered successfully.')}
+import {
+  computed,
+  reactive,
+  ref,
+} from "vue";
+
+import {
+  RouterLink,
+} from "vue-router";
+
+import {
+  UserPlus,
+} from "lucide-vue-next";
+
+
+import PageHeader
+  from "../components/PageHeader.vue";
+
+
+import Modal
+  from "../components/Modal.vue";
+
+
+import TagInput
+  from "../components/TagInput.vue";
+
+
+import BaseButton
+  from "../components/ui/BaseButton.vue";
+
+
+import BaseInput
+  from "../components/ui/BaseInput.vue";
+
+
+import BaseSelect
+  from "../components/ui/BaseSelect.vue";
+
+
+import BaseTextarea
+  from "../components/ui/BaseTextarea.vue";
+
+
+import FormField
+  from "../components/forms/FormField.vue";
+
+
+import {
+  useEHR,
+} from "../stores/ehr";
+
+
+const {
+  patients,
+  loading,
+  addPatient,
+  updatePatient,
+} =
+  useEHR();
+
+
+const search =
+  ref("");
+
+
+const genderFilter =
+  ref("");
+
+
+const openRegister =
+  ref(false);
+
+
+const openEdit =
+  ref(false);
+
+
+const editing =
+  ref(false);
+
+
+const editingId =
+  ref("");
+
+
+const saving =
+  ref(false);
+
+
+const error =
+  ref("");
+
+
+const bloodGroups =
+  [
+    "O+",
+    "O-",
+    "A+",
+    "A-",
+    "B+",
+    "B-",
+    "AB+",
+    "AB-",
+  ];
+
+
+const form =
+  reactive<any>({
+    firstName: "",
+    lastName: "",
+
+    nic: "",
+
+    dateOfBirth: "",
+
+    gender: "Male",
+
+    bloodGroup:
+      "O+",
+
+    heightCm: 170,
+
+    weightKg: 70,
+
+    phone: "",
+
+    email: "",
+
+    address: "",
+
+    province:
+      "Western Province",
+
+    district:
+      "Colombo",
+
+    workplace: "",
+
+    foodAllergies:
+      [],
+
+    medicalAllergies:
+      [],
+
+    registrationNotes:
+      "",
+  });
+
+
+const filtered =
+  computed(() => {
+    const q =
+      search.value
+        .trim()
+        .toLowerCase();
+
+
+    return patients.value
+      .filter(
+        (
+          patient,
+        ) => {
+          const matchesText =
+            !q ||
+            [
+              patient.firstName,
+
+              patient.lastName,
+
+              patient.patientNumber,
+
+              patient.nic,
+
+              patient.phone,
+            ]
+              .filter(Boolean)
+              .join(" ")
+              .toLowerCase()
+              .includes(q);
+
+
+          const matchesGender =
+            !genderFilter.value ||
+            patient.gender ===
+            genderFilter.value;
+
+
+          return (
+            matchesText &&
+            matchesGender
+          );
+        },
+      );
+  });
+
+
+function resetForm() {
+  Object.assign(
+    form,
+    {
+      firstName: "",
+      lastName: "",
+
+      nic: "",
+
+      dateOfBirth: "",
+
+      gender: "Male",
+
+      bloodGroup:
+        "O+",
+
+      heightCm: 170,
+
+      weightKg: 70,
+
+      phone: "",
+
+      email: "",
+
+      address: "",
+
+      province:
+        "Western Province",
+
+      district:
+        "Colombo",
+
+      workplace: "",
+
+      foodAllergies:
+        [],
+
+      medicalAllergies:
+        [],
+
+      registrationNotes:
+        "",
+    },
+  );
+}
+
+
+function closeModal() {
+  if (saving.value) {
+    return;
+  }
+
+
+  openRegister.value =
+    false;
+
+  openEdit.value =
+    false;
+
+  editing.value =
+    false;
+
+  error.value =
+    "";
+}
+
+
+function startEdit(
+  patient: any,
+) {
+  editing.value =
+    true;
+
+  editingId.value =
+    patient.id;
+
+
+  Object.assign(
+    form,
+    {
+      firstName:
+        patient.firstName,
+
+      lastName:
+        patient.lastName,
+
+      nic:
+        patient.nic,
+
+      dateOfBirth:
+        patient.dateOfBirth,
+
+      gender:
+        patient.gender,
+
+      bloodGroup:
+        patient.bloodGroup,
+
+      heightCm:
+        patient.heightCm,
+
+      weightKg:
+        patient.weightKg,
+
+      phone:
+        patient.phone,
+
+      email:
+        patient.email,
+
+      address:
+        patient.address,
+
+      province:
+        patient.province,
+
+      district:
+        patient.district,
+
+      workplace:
+        patient.workplace,
+
+      foodAllergies:
+        [
+          ...(patient.foodAllergies ||
+            []),
+        ],
+
+      medicalAllergies:
+        [
+          ...(patient.medicalAllergies ||
+            []),
+        ],
+
+      registrationNotes:
+        patient.registrationNotes ||
+        "",
+    },
+  );
+
+
+  error.value =
+    "";
+
+  openEdit.value =
+    true;
+}
+
+
+async function savePatient() {
+  saving.value =
+    true;
+
+  error.value =
+    "";
+
+
+  try {
+    if (
+      editing.value
+    ) {
+      await updatePatient(
+        editingId.value,
+        {
+          ...form,
+
+          allergies: [
+            ...form.foodAllergies,
+            ...form.medicalAllergies,
+          ],
+        },
+      );
+    } else {
+      await addPatient({
+        ...form,
+
+        allergies: [
+          ...form.foodAllergies,
+          ...form.medicalAllergies,
+        ],
+      });
+    }
+
+
+    closeModal();
+
+    resetForm();
+  } catch (saveError) {
+    error.value =
+      saveError instanceof
+        Error
+        ? saveError.message
+        : "Unable to save patient.";
+  } finally {
+    saving.value =
+      false;
+  }
+}
 </script>
