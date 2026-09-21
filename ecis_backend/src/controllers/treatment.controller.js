@@ -2,34 +2,14 @@ const treatmentService = require("../services/treatment.service");
 
 async function createTreatment(req, res, next) {
   try {
-    const { patientId, encounterId, treatmentType } = req.body;
-
-    if (!patientId) {
-      return res.status(400).json({
-        success: false,
-        message: "patientId is required",
-      });
-    }
-
-    if (!encounterId) {
-      return res.status(400).json({
-        success: false,
-        message: "encounterId is required",
-      });
-    }
-
-    if (!treatmentType || !treatmentType.trim()) {
-      return res.status(400).json({
-        success: false,
-        message: "treatmentType is required",
-      });
-    }
-
-    const treatment = await treatmentService.createTreatment(req.body);
+    const treatment = await treatmentService.createTreatment(
+      req.body || {},
+      req.user,
+    );
 
     return res.status(201).json({
       success: true,
-      message: "Treatment record created successfully",
+      message: "Treatment record created successfully.",
       data: treatment,
     });
   } catch (error) {
@@ -39,7 +19,9 @@ async function createTreatment(req, res, next) {
 
 async function getAllTreatments(req, res, next) {
   try {
-    const treatments = await treatmentService.getAllTreatments();
+    const treatments = await treatmentService.getAllTreatments(
+      req.user.hospitalId,
+    );
 
     return res.status(200).json({
       success: true,
@@ -53,9 +35,10 @@ async function getAllTreatments(req, res, next) {
 
 async function getPatientTreatments(req, res, next) {
   try {
-    const { patientId } = req.params;
-
-    const treatments = await treatmentService.getPatientTreatments(patientId);
+    const treatments = await treatmentService.getPatientTreatments(
+      req.params.patientId,
+      req.user.hospitalId,
+    );
 
     return res.status(200).json({
       success: true,
@@ -69,14 +52,15 @@ async function getPatientTreatments(req, res, next) {
 
 async function getTreatmentById(req, res, next) {
   try {
-    const { treatmentId } = req.params;
-
-    const treatment = await treatmentService.getTreatmentById(treatmentId);
+    const treatment = await treatmentService.getTreatmentById(
+      req.params.treatmentId,
+      req.user.hospitalId,
+    );
 
     if (!treatment) {
       return res.status(404).json({
         success: false,
-        message: "Treatment record not found",
+        message: "Treatment record not found.",
       });
     }
 

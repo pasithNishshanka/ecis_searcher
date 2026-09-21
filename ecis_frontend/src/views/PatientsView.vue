@@ -73,6 +73,10 @@
               </th>
 
               <th class="px-5 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
+                Age
+              </th>
+
+              <th class="px-5 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
                 Blood
               </th>
 
@@ -141,10 +145,12 @@ patient in filtered
 
 
               <td class="px-5 py-4 text-sm">
-                {{
-                  patient.dateOfBirth ||
-                  "—"
-                }}
+                {{ formatDate(patient.dateOfBirth) }}
+              </td>
+
+
+              <td class="px-5 py-4 text-sm font-bold">
+                {{ calculateAge(patient.dateOfBirth) ?? "—" }}
               </td>
 
 
@@ -157,10 +163,7 @@ patient in filtered
 
 
               <td class="px-5 py-4 text-sm">
-                {{
-                  patient.district ||
-                  "—"
-                }}
+                {{ formatLocation(patient) }}
               </td>
 
 
@@ -189,7 +192,7 @@ patient in filtered
             <tr v-if="
               !filtered.length
             ">
-              <td colspan="5" class="p-12 text-center text-sm text-slate-400">
+              <td colspan="6" class="p-12 text-center text-sm text-slate-400">
                 {{
                   loading
                     ? "Loading registered patients..."
@@ -208,14 +211,14 @@ patient in filtered
     <Modal :open="openRegister ||
       openEdit
       " :title="editing
-          ? 'Edit patient'
-          : 'Register new patient'
+        ? 'Edit patient'
+        : 'Register new patient'
         " :description="editing
           ? 'Update the existing permanent patient EHR.'
           : 'Create the permanent patient record. Later clinical records remain linked to this patient.'
-        " @close="
-        closeModal
-      ">
+          " @close="
+            closeModal
+          ">
       <form class="space-y-5" @submit.prevent="
         savePatient
       ">
@@ -241,8 +244,13 @@ patient in filtered
 
 
           <FormField label="Date of birth" required>
-            <BaseInput v-model="form.dateOfBirth
-              " type="date" required />
+            <BaseInput v-model="form.dateOfBirth" type="date" :max="todayDateInputValue()" required />
+          </FormField>
+
+
+          <FormField label="Age">
+            <BaseInput :model-value="currentAge == null ? '' : String(currentAge)" readonly
+              :placeholder="form.dateOfBirth ? 'Calculated automatically' : 'Enter date of birth'" />
           </FormField>
 
 
@@ -271,7 +279,7 @@ patient in filtered
 group in bloodGroups
                 " :key="group
                   " :value="group
-                  ">
+                    ">
                 {{ group }}
               </option>
             </BaseSelect>
@@ -443,6 +451,14 @@ import {
   useEHR,
 } from "../stores/ehr";
 
+import {
+  calculateAge,
+  formatDate,
+  formatLocation,
+  toDateInputValue,
+  todayDateInputValue,
+} from "../utils/patient";
+
 
 const {
   patients,
@@ -558,14 +574,13 @@ const filtered =
             !q ||
             [
               patient.firstName,
-
               patient.lastName,
-
               patient.patientNumber,
-
               patient.nic,
-
               patient.phone,
+              patient.address,
+              patient.district,
+              patient.province,
             ]
               .filter(Boolean)
               .join(" ")
@@ -586,6 +601,9 @@ const filtered =
         },
       );
   });
+
+
+const currentAge = computed(() => calculateAge(form.dateOfBirth));
 
 
 function resetForm() {
@@ -678,7 +696,7 @@ function startEdit(
         patient.nic,
 
       dateOfBirth:
-        patient.dateOfBirth,
+        toDateInputValue(patient.dateOfBirth),
 
       gender:
         patient.gender,
@@ -746,9 +764,23 @@ async function savePatient() {
 
 
   try {
+    const calculatedAge = calculateAge(form.dateOfBirth);
+
+    if (!form.dateOfBirth) {
+      throw new Error("Date of birth is required.");
+    }
+
     if (
-      editing.value
+      calculatedAge === null ||
+      calculatedAge < 18 ||
+      calculatedAge > 120
     ) {
+      throw new Error(
+        "Only patients aged 18 years or older can be registered.",
+      );
+    }
+
+    if (editing.value) {
       await updatePatient(
         editingId.value,
         {

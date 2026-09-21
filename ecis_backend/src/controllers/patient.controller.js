@@ -1,106 +1,91 @@
 const patientService = require("../services/patient.service");
 
-/* ============================================================
-   CREATE
-   ============================================================ */
+function getHospitalId(req) {
+  const hospitalId = Number(req.user?.hospitalId);
+
+  return Number.isInteger(hospitalId) && hospitalId > 0 ? hospitalId : null;
+}
 
 async function createPatient(req, res, next) {
   try {
-    const hospitalId = req.user?.hospitalId;
+    const hospitalId = getHospitalId(req);
 
     if (!hospitalId) {
       return res.status(401).json({
         success: false,
-
         message: "Authenticated hospital information is missing.",
-      });
-    }
-
-    if (!req.body?.firstName || !String(req.body.firstName).trim()) {
-      return res.status(400).json({
-        success: false,
-
-        message: "First name is required.",
-      });
-    }
-
-    if (!req.body?.dateOfBirth) {
-      return res.status(400).json({
-        success: false,
-
-        message: "Date of birth is required.",
       });
     }
 
     const patient = await patientService.createPatient({
       ...req.body,
-
       hospitalId,
     });
 
     return res.status(201).json({
       success: true,
-
       message: "Patient registered successfully.",
-
       data: patient,
     });
   } catch (error) {
-    console.error("CREATE PATIENT:", error);
-
     next(error);
   }
 }
-
-/* ============================================================
-   GET ALL
-   ============================================================ */
 
 async function getAllPatients(req, res, next) {
   try {
-    const patients = await patientService.getAllPatients(req.user.hospitalId);
+    const hospitalId = getHospitalId(req);
+
+    if (!hospitalId) {
+      return res.status(401).json({
+        success: false,
+        message: "Authenticated hospital information is missing.",
+      });
+    }
+
+    const patients = await patientService.getAllPatients(hospitalId);
 
     return res.status(200).json({
       success: true,
-
       count: patients.length,
-
       data: patients,
     });
   } catch (error) {
-    console.error("GET PATIENTS:", error);
-
     next(error);
   }
 }
 
-/* ============================================================
-   GET BY ID
-   ============================================================ */
-
 async function getPatientById(req, res, next) {
   try {
-    const patient = await patientService.getPatientById(req.params.patientId);
+    const hospitalId = getHospitalId(req);
+
+    const patientId = Number(req.params.patientId);
+
+    if (!hospitalId) {
+      return res.status(401).json({
+        success: false,
+        message: "Authenticated hospital information is missing.",
+      });
+    }
+
+    if (!Number.isInteger(patientId) || patientId <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid patient ID.",
+      });
+    }
+
+    const patient = await patientService.getPatientById(patientId, hospitalId);
 
     if (!patient) {
       return res.status(404).json({
         success: false,
-
         message: "Patient not found.",
-      });
-    }
-
-    if (Number(patient.hospital_id) !== Number(req.user.hospitalId)) {
-      return res.status(403).json({
-        success: false,
-
-        message: "Patient does not belong to your hospital.",
       });
     }
 
     return res.status(200).json({
       success: true,
-
       data: patient,
     });
   } catch (error) {
@@ -108,33 +93,34 @@ async function getPatientById(req, res, next) {
   }
 }
 
-/* ============================================================
-   SEARCH
-   ============================================================ */
-
 async function searchPatients(req, res, next) {
   try {
+    const hospitalId = getHospitalId(req);
+
     const searchTerm = String(req.query.q || "").trim();
+
+    if (!hospitalId) {
+      return res.status(401).json({
+        success: false,
+        message: "Authenticated hospital information is missing.",
+      });
+    }
 
     if (!searchTerm) {
       return res.status(400).json({
         success: false,
-
         message: "Search query is required.",
       });
     }
 
     const patients = await patientService.searchPatients(
-      req.user.hospitalId,
-
+      hospitalId,
       searchTerm,
     );
 
     return res.status(200).json({
       success: true,
-
       count: patients.length,
-
       data: patients,
     });
   } catch (error) {
@@ -142,41 +128,42 @@ async function searchPatients(req, res, next) {
   }
 }
 
-/* ============================================================
-   UPDATE
-   ============================================================ */
-
 async function updatePatient(req, res, next) {
   try {
-    const patient = await patientService.getPatientById(req.params.patientId);
+    const hospitalId = getHospitalId(req);
 
-    if (!patient) {
-      return res.status(404).json({
+    const patientId = Number(req.params.patientId);
+
+    if (!hospitalId) {
+      return res.status(401).json({
         success: false,
-
-        message: "Patient not found.",
+        message: "Authenticated hospital information is missing.",
       });
     }
 
-    if (Number(patient.hospital_id) !== Number(req.user.hospitalId)) {
-      return res.status(403).json({
+    if (!Number.isInteger(patientId) || patientId <= 0) {
+      return res.status(400).json({
         success: false,
-
-        message: "Patient does not belong to your hospital.",
+        message: "Invalid patient ID.",
       });
     }
 
     const updated = await patientService.updatePatient(
-      req.params.patientId,
-
-      req.body,
+      patientId,
+      hospitalId,
+      req.body || {},
     );
+
+    if (!updated) {
+      return res.status(404).json({
+        success: false,
+        message: "Patient not found.",
+      });
+    }
 
     return res.status(200).json({
       success: true,
-
       message: "Patient updated successfully.",
-
       data: updated,
     });
   } catch (error) {
@@ -186,12 +173,8 @@ async function updatePatient(req, res, next) {
 
 module.exports = {
   createPatient,
-
   getAllPatients,
-
   getPatientById,
-
   searchPatients,
-
   updatePatient,
 };

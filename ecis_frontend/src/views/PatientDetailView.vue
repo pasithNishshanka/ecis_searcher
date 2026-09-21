@@ -1,43 +1,26 @@
 <template>
-  <div
-    v-if="patient"
-  >
-    <PageHeader
-      eyebrow="Patient EHR"
-      :title="`${patient.firstName} ${patient.lastName}`"
-      :description="`${patient.patientNumber} · Longitudinal clinical record`"
-    >
-      <BaseButton
-        @click="
-          openTreatment = true
-        "
-      >
+  <div v-if="patient">
+    <PageHeader eyebrow="Patient EHR" :title="`${patient.firstName} ${patient.lastName}`"
+      :description="`${patient.patientNumber} · Longitudinal clinical record`">
+      <BaseButton @click="
+        openTreatment = true
+        ">
         Add clinical record
       </BaseButton>
     </PageHeader>
 
 
-    <div
-      class="grid gap-6 xl:grid-cols-[320px_1fr]"
-    >
+    <div class="grid gap-6 xl:grid-cols-[320px_1fr]">
       <!-- =================================================
            LEFT
            ================================================= -->
 
-      <aside
-        class="space-y-4"
-      >
+      <aside class="space-y-4">
         <!-- Patient summary -->
 
-        <div
-          class="card p-5"
-        >
-          <div
-            class="flex gap-3"
-          >
-            <div
-              class="avatar"
-            >
+        <div class="card p-5">
+          <div class="flex gap-3">
+            <div class="avatar">
               {{
                 patient
                   .firstName?.[0] ||
@@ -59,9 +42,7 @@
                 }}
               </b>
 
-              <p
-                class="text-xs text-slate-400"
-              >
+              <p class="text-xs text-slate-400">
                 {{
                   patient.patientNumber
                 }}
@@ -70,87 +51,49 @@
           </div>
 
 
-          <div
-            class="mt-5 grid grid-cols-2 gap-2"
-          >
-            <Info
-              l="DOB"
-              :v="
-                patient.dateOfBirth
-              "
-            />
+          <div class="mt-5 grid grid-cols-2 gap-2">
+            <Info l="DOB" :v="patient.dateOfBirth
+              " />
 
-            <Info
-              l="Age"
-              :v="
-                `${age} years`
-              "
-            />
+            <Info l="Age" :v="`${age} years`
+              " />
 
-            <Info
-              l="Blood"
-              :v="
-                patient.bloodGroup ||
-                '—'
-              "
-            />
+            <Info l="Blood" :v="patient.bloodGroup ||
+              '—'
+              " />
 
-            <Info
-              l="Gender"
-              :v="
-                patient.gender ||
-                '—'
-              "
-            />
+            <Info l="Gender" :v="patient.gender ||
+              '—'
+              " />
 
-            <Info
-              l="Height"
-              :v="
-                patient.heightCm
-                  ? `${patient.heightCm} cm`
-                  : '—'
-              "
-            />
+            <Info l="Height" :v="patient.heightCm
+                ? `${patient.heightCm} cm`
+                : '—'
+              " />
 
-            <Info
-              l="Weight"
-              :v="
-                patient.weightKg
-                  ? `${patient.weightKg} kg`
-                  : '—'
-              "
-            />
+            <Info l="Weight" :v="patient.weightKg
+                ? `${patient.weightKg} kg`
+                : '—'
+              " />
 
-            <Info
-              l="Province"
-              :v="
-                patient.province ||
-                '—'
-              "
-            />
+            <Info l="Province" :v="patient.province ||
+              '—'
+              " />
 
-            <Info
-              l="District"
-              :v="
-                patient.district ||
-                '—'
-              "
-            />
+            <Info l="District" :v="patient.district ||
+              '—'
+              " />
           </div>
 
 
           <!-- Address -->
 
-          <div
-            class="mt-3 rounded-xl bg-slate-50 p-3"
-          >
+          <div class="mt-3 rounded-xl bg-slate-50 p-3">
             <p class="label">
               Address
             </p>
 
-            <p
-              class="text-sm"
-            >
+            <p class="text-sm">
               {{
                 patient.address ||
                 "Not recorded"
@@ -161,16 +104,12 @@
 
           <!-- Workplace -->
 
-          <div
-            class="mt-3 rounded-xl bg-slate-50 p-3"
-          >
+          <div class="mt-3 rounded-xl bg-slate-50 p-3">
             <p class="label">
               Workplace
             </p>
 
-            <p
-              class="text-sm"
-            >
+            <p class="text-sm">
               {{
                 patient.workplace ||
                 "Not recorded"
@@ -182,45 +121,29 @@
 
         <!-- Allergies -->
 
-        <div
-          class="rounded-2xl border border-amber-200 bg-amber-50 p-5"
-        >
-          <p
-            class="font-bold text-amber-900"
-          >
+        <div class="rounded-2xl border border-amber-200 bg-amber-50 p-5">
+          <p class="font-bold text-amber-900">
             Allergy information
           </p>
 
 
-          <div
-            class="mt-4 space-y-4"
-          >
+          <div class="mt-4 space-y-4">
             <!-- Food -->
 
             <div>
-              <p
-                class="text-xs font-bold uppercase tracking-wide text-amber-700"
-              >
+              <p class="text-xs font-bold uppercase tracking-wide text-amber-700">
                 Food allergies
               </p>
 
 
-              <div
-                v-if="
-                  patient.foodAllergies
-                    ?.length
-                "
-                class="mt-2 flex flex-wrap gap-2"
-              >
-                <span
-                  v-for="
-                    allergy in patient.foodAllergies
-                  "
-                  :key="
-                    `food-${allergy}`
-                  "
-                  class="rounded-full bg-white px-3 py-1 text-xs font-medium text-amber-900"
-                >
+              <div v-if="
+                patient.foodAllergies
+                  ?.length
+              " class="mt-2 flex flex-wrap gap-2">
+                <span v-for="
+allergy in patient.foodAllergies
+                  " :key="`food-${allergy}`
+                    " class="rounded-full bg-white px-3 py-1 text-xs font-medium text-amber-900">
                   {{
                     allergy
                   }}
@@ -228,10 +151,7 @@
               </div>
 
 
-              <p
-                v-else
-                class="mt-1 text-sm text-amber-800"
-              >
+              <p v-else class="mt-1 text-sm text-amber-800">
                 None recorded
               </p>
             </div>
@@ -240,29 +160,19 @@
             <!-- Medical -->
 
             <div>
-              <p
-                class="text-xs font-bold uppercase tracking-wide text-amber-700"
-              >
+              <p class="text-xs font-bold uppercase tracking-wide text-amber-700">
                 Medical / drug allergies
               </p>
 
 
-              <div
-                v-if="
-                  patient.medicalAllergies
-                    ?.length
-                "
-                class="mt-2 flex flex-wrap gap-2"
-              >
-                <span
-                  v-for="
-                    allergy in patient.medicalAllergies
-                  "
-                  :key="
-                    `medical-${allergy}`
-                  "
-                  class="rounded-full bg-white px-3 py-1 text-xs font-medium text-amber-900"
-                >
+              <div v-if="
+                patient.medicalAllergies
+                  ?.length
+              " class="mt-2 flex flex-wrap gap-2">
+                <span v-for="
+allergy in patient.medicalAllergies
+                  " :key="`medical-${allergy}`
+                    " class="rounded-full bg-white px-3 py-1 text-xs font-medium text-amber-900">
                   {{
                     allergy
                   }}
@@ -270,10 +180,7 @@
               </div>
 
 
-              <p
-                v-else
-                class="mt-1 text-sm text-amber-800"
-              >
+              <p v-else class="mt-1 text-sm text-amber-800">
                 None recorded
               </p>
             </div>
@@ -283,21 +190,14 @@
 
         <!-- Registration notes -->
 
-        <div
-          v-if="
-            patient.registrationNotes
-          "
-          class="rounded-2xl bg-slate-50 p-5"
-        >
-          <p
-            class="font-bold text-slate-900"
-          >
+        <div v-if="
+          patient.registrationNotes
+        " class="rounded-2xl bg-slate-50 p-5">
+          <p class="font-bold text-slate-900">
             Registration notes
           </p>
 
-          <p
-            class="mt-2 whitespace-pre-line text-sm leading-6 text-slate-600"
-          >
+          <p class="mt-2 whitespace-pre-line text-sm leading-6 text-slate-600">
             {{
               patient.registrationNotes
             }}
@@ -307,13 +207,8 @@
 
         <!-- AI -->
 
-        <RouterLink
-          to="/medical"
-        >
-          <BaseButton
-            variant="secondary"
-            block
-          >
+        <RouterLink to="/medical">
+          <BaseButton variant="secondary" block>
             Open AI summary
           </BaseButton>
         </RouterLink>
@@ -324,58 +219,36 @@
            RIGHT
            ================================================= -->
 
-      <section
-        class="card overflow-hidden"
-      >
-        <div
-          class="border-b p-5"
-        >
-          <h2
-            class="section-title"
-          >
+      <section class="card overflow-hidden">
+        <div class="border-b p-5">
+          <h2 class="section-title">
             Treatment history
           </h2>
 
-          <p
-            class="muted mt-1"
-          >
+          <p class="muted mt-1">
             OPD, ward, surgery, procedures, imaging and emergency records remain linked to this patient.
           </p>
         </div>
 
 
-        <div
-          class="divide-y divide-slate-100"
-        >
-          <article
-            v-for="t in records"
-            :key="t.id"
-            class="p-5"
-          >
-            <div
-              class="flex flex-col justify-between gap-2 sm:flex-row"
-            >
+        <div class="divide-y divide-slate-100">
+          <article v-for="t in records" :key="t.id" class="p-5">
+            <div class="flex flex-col justify-between gap-2 sm:flex-row">
               <div>
-                <span
-                  class="badge"
-                >
+                <span class="badge">
                   {{
                     t.type
                   }}
                 </span>
 
-                <h3
-                  class="mt-2 font-bold"
-                >
+                <h3 class="mt-2 font-bold">
                   {{
                     t.treatment ||
                     "Clinical record"
                   }}
                 </h3>
 
-                <p
-                  class="text-sm text-slate-500"
-                >
+                <p class="text-sm text-slate-500">
                   {{
                     t.diagnosis ||
                     "No diagnosis recorded"
@@ -384,9 +257,7 @@
               </div>
 
 
-              <span
-                class="text-xs text-slate-400"
-              >
+              <span class="text-xs text-slate-400">
                 {{
                   t.date
                 }}
@@ -394,12 +265,8 @@
             </div>
 
 
-            <div
-              class="mt-3 grid gap-2 sm:grid-cols-2"
-            >
-              <p
-                class="text-sm text-slate-600"
-              >
+            <div class="mt-3 grid gap-2 sm:grid-cols-2">
+              <p class="text-sm text-slate-600">
                 <b>
                   Department:
                 </b>
@@ -411,9 +278,7 @@
               </p>
 
 
-              <p
-                class="text-sm text-slate-600"
-              >
+              <p class="text-sm text-slate-600">
                 <b>
                   Doctor:
                 </b>
@@ -425,12 +290,9 @@
               </p>
 
 
-              <p
-                v-if="
-                  t.bodyRegion
-                "
-                class="text-sm text-slate-600"
-              >
+              <p v-if="
+                t.bodyRegion
+              " class="text-sm text-slate-600">
                 <b>
                   Body region:
                 </b>
@@ -441,12 +303,9 @@
               </p>
 
 
-              <p
-                v-if="
-                  t.clinicalFinding
-                "
-                class="text-sm text-slate-600"
-              >
+              <p v-if="
+                t.clinicalFinding
+              " class="text-sm text-slate-600">
                 <b>
                   Finding:
                 </b>
@@ -457,12 +316,9 @@
               </p>
 
 
-              <p
-                v-if="
-                  t.implant
-                "
-                class="text-sm text-slate-600"
-              >
+              <p v-if="
+                t.implant
+              " class="text-sm text-slate-600">
                 <b>
                   Implant:
                 </b>
@@ -479,12 +335,9 @@
               </p>
 
 
-              <p
-                v-if="
-                  t.scar
-                "
-                class="text-sm text-slate-600"
-              >
+              <p v-if="
+                t.scar
+              " class="text-sm text-slate-600">
                 <b>
                   Scar:
                 </b>
@@ -495,12 +348,9 @@
               </p>
 
 
-              <p
-                v-if="
-                  t.oldFracture
-                "
-                class="text-sm text-slate-600"
-              >
+              <p v-if="
+                t.oldFracture
+              " class="text-sm text-slate-600">
                 <b>
                   Old fracture:
                 </b>
@@ -511,12 +361,9 @@
               </p>
 
 
-              <p
-                v-if="
-                  t.birthmark
-                "
-                class="text-sm text-slate-600"
-              >
+              <p v-if="
+                t.birthmark
+              " class="text-sm text-slate-600">
                 <b>
                   Birthmark:
                 </b>
@@ -527,12 +374,9 @@
               </p>
 
 
-              <p
-                v-if="
-                  t.tattoo
-                "
-                class="text-sm text-slate-600"
-              >
+              <p v-if="
+                t.tattoo
+              " class="text-sm text-slate-600">
                 <b>
                   Tattoo:
                 </b>
@@ -543,12 +387,9 @@
               </p>
 
 
-              <p
-                v-if="
-                  t.missingBodyPart
-                "
-                class="text-sm text-slate-600"
-              >
+              <p v-if="
+                t.missingBodyPart
+              " class="text-sm text-slate-600">
                 <b>
                   Missing body part:
                 </b>
@@ -560,10 +401,7 @@
             </div>
 
 
-            <p
-              v-if="t.notes"
-              class="mt-3 text-sm leading-6 text-slate-600"
-            >
+            <p v-if="t.notes" class="mt-3 text-sm leading-6 text-slate-600">
               {{
                 t.notes
               }}
@@ -571,12 +409,9 @@
           </article>
 
 
-          <div
-            v-if="
-              !records.length
-            "
-            class="p-10 text-center text-sm text-slate-400"
-          >
+          <div v-if="
+            !records.length
+          " class="p-10 text-center text-sm text-slate-400">
             No treatment records yet.
           </div>
         </div>
@@ -588,28 +423,17 @@
          ADD CLINICAL RECORD MODAL
          =================================================== -->
 
-    <Modal
-      :open="
-        openTreatment
-      "
-      title="Add clinical record"
+    <Modal :open="openTreatment
+      " title="Add clinical record"
       description="This is how a later surgery, procedure, scar, implant or other finding becomes searchable by ECIS."
       @close="
         openTreatment = false
-      "
-    >
-      <form
-        @submit.prevent="
-          save
-        "
-        class="grid gap-4 sm:grid-cols-2"
-      >
-        <FormField
-          label="Record type"
-        >
-          <BaseSelect
-            v-model="t.type"
-          >
+        ">
+      <form @submit.prevent="
+        save
+      " class="grid gap-4 sm:grid-cols-2">
+        <FormField label="Record type">
+          <BaseSelect v-model="t.type">
             <option>
               OPD
             </option>
@@ -641,82 +465,42 @@
         </FormField>
 
 
-        <FormField
-          label="Date"
-          required
-        >
-          <BaseInput
-            v-model="t.date"
-            type="date"
-            required
-          />
+        <FormField label="Date" required>
+          <BaseInput v-model="t.date" type="date" required />
         </FormField>
 
 
-        <FormField
-          label="Department"
-          required
-        >
-          <BaseInput
-            v-model="
-              t.department
-            "
-            required
-          />
+        <FormField label="Department" required>
+          <BaseInput v-model="t.department
+            " required />
         </FormField>
 
 
-        <FormField
-          label="Doctor"
-        >
-          <BaseInput
-            v-model="
-              t.doctor
-            "
-          />
+        <FormField label="Doctor">
+          <BaseInput v-model="t.doctor
+            " />
         </FormField>
 
 
-        <div
-          class="sm:col-span-2"
-        >
-          <FormField
-            label="Diagnosis"
-          >
-            <BaseInput
-              v-model="
-                t.diagnosis
-              "
-            />
+        <div class="sm:col-span-2">
+          <FormField label="Diagnosis">
+            <BaseInput v-model="t.diagnosis
+              " />
           </FormField>
         </div>
 
 
-        <div
-          class="sm:col-span-2"
-        >
-          <FormField
-            label="Treatment / procedure"
-            required
-          >
-            <BaseInput
-              v-model="
-                t.treatment
-              "
-              required
-            />
+        <div class="sm:col-span-2">
+          <FormField label="Treatment / procedure" required>
+            <BaseInput v-model="t.treatment
+              " required />
           </FormField>
         </div>
 
 
-        <FormField
-          label="Body region"
-        >
-          <BaseSelect
-            v-model="
-              t.bodyRegion
-            "
-          >
+        <FormField label="Body region">
+          <BaseSelect v-model="t.bodyRegion
+            ">
             <option value="">
               Not specified
             </option>
@@ -752,131 +536,72 @@
         </FormField>
 
 
-        <FormField
-          label="Clinical finding"
-        >
-          <BaseInput
-            v-model="
-              t.clinicalFinding
-            "
-            placeholder="Surgical scar, birthmark..."
-          />
+        <FormField label="Clinical finding">
+          <BaseInput v-model="t.clinicalFinding
+            " placeholder="Surgical scar, birthmark..." />
         </FormField>
 
 
-        <FormField
-          label="Implant / device"
-        >
-          <BaseInput
-            v-model="
-              t.implant
-            "
-            placeholder="Pacemaker, orthopedic plate"
-          />
+        <FormField label="Implant / device">
+          <BaseInput v-model="t.implant
+            " placeholder="Pacemaker, orthopedic plate" />
         </FormField>
 
 
-        <FormField
-          label="Implant serial number"
-        >
-          <BaseInput
-            v-model="
-              t.implantSerial
-            "
-          />
+        <FormField label="Implant serial number">
+          <BaseInput v-model="t.implantSerial
+            " />
         </FormField>
 
 
-        <FormField
-          label="Surgical scar"
-        >
-          <BaseInput
-            v-model="
-              t.scar
-            "
-            placeholder="Right arm surgical scar"
-          />
+        <FormField label="Surgical scar">
+          <BaseInput v-model="t.scar
+            " placeholder="Right arm surgical scar" />
         </FormField>
 
 
-        <FormField
-          label="Old fracture"
-        >
-          <BaseInput
-            v-model="
-              t.oldFracture
-            "
-          />
+        <FormField label="Old fracture">
+          <BaseInput v-model="t.oldFracture
+            " />
         </FormField>
 
 
-        <FormField
-          label="Birthmark"
-        >
-          <BaseInput
-            v-model="
-              t.birthmark
-            "
-          />
+        <FormField label="Birthmark">
+          <BaseInput v-model="t.birthmark
+            " />
         </FormField>
 
 
-        <FormField
-          label="Tattoo"
-        >
-          <BaseInput
-            v-model="
-              t.tattoo
-            "
-          />
+        <FormField label="Tattoo">
+          <BaseInput v-model="t.tattoo
+            " />
         </FormField>
 
 
-        <FormField
-          label="Missing body part"
-        >
-          <BaseInput
-            v-model="
-              t.missingBodyPart
-            "
-            placeholder="Left index finger"
-          />
+        <FormField label="Missing body part">
+          <BaseInput v-model="t.missingBodyPart
+            " placeholder="Left index finger" />
         </FormField>
 
 
-        <div
-          class="sm:col-span-2"
-        >
-          <FormField
-            label="Clinical notes"
-          >
-            <BaseTextarea
-              v-model="
-                t.notes
-              "
-            />
+        <div class="sm:col-span-2">
+          <FormField label="Clinical notes">
+            <BaseTextarea v-model="t.notes
+              " />
           </FormField>
         </div>
 
 
-        <div
-          class="sm:col-span-2 flex justify-end gap-2 border-t pt-4"
-        >
-          <BaseButton
-            variant="secondary"
-            type="button"
-            @click="
-              openTreatment =
-                false
-            "
-          >
+        <div class="sm:col-span-2 flex justify-end gap-2 border-t pt-4">
+          <BaseButton variant="secondary" type="button" @click="
+            openTreatment =
+            false
+            ">
             Cancel
           </BaseButton>
 
 
-          <BaseButton
-            type="submit"
-          >
+          <BaseButton type="submit">
             Save clinical record
           </BaseButton>
         </div>
@@ -885,13 +610,8 @@
   </div>
 
 
-  <div
-    v-else
-    class="card p-12 text-center"
-  >
-    <p
-      class="text-sm text-slate-500"
-    >
+  <div v-else class="card p-12 text-center">
+    <p class="text-sm text-slate-500">
       Patient not found.
     </p>
   </div>
@@ -899,6 +619,8 @@
 
 
 <script setup lang="ts">
+import { calculateAge } from "../utils/patient";
+
 import {
   computed,
   reactive,
@@ -987,50 +709,17 @@ const records =
   computed(() =>
     patient.value
       ? treatmentsForPatient(
-          patient.value.id,
-        )
+        patient.value.id,
+      )
       : [],
   );
 
 
-const age =
-  computed(() => {
-    if (
-      !patient.value
-        ?.dateOfBirth
-    ) {
-      return 0;
-    }
-
-
-    const timestamp =
-      new Date(
-        patient.value
-          .dateOfBirth,
-      ).getTime();
-
-
-    if (
-      Number.isNaN(
-        timestamp,
-      )
-    ) {
-      return 0;
-    }
-
-
-    return Math.max(
-      0,
-
-      Math.floor(
-        (
-          Date.now() -
-          timestamp
-        ) /
-          31557600000,
-      ),
-    );
-  });
+const age = computed(() =>
+  patient.value?.dateOfBirth
+    ? calculateAge(patient.value.dateOfBirth) ?? 0
+    : 0,
+);
 
 
 const openTreatment =

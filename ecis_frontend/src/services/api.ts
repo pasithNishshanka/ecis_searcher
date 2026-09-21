@@ -1,9 +1,13 @@
-const API_BASE_URL = "http://localhost:5000/api";
+const API_BASE_URL = (
+  import.meta.env.VITE_API_BASE_URL || "http://localhost:5000/api"
+).replace(/\/$/, "");
+
 const REQUEST_TIMEOUT_MS = 30000;
 
 interface ApiErrorResponse {
   success?: boolean;
   message?: string;
+  code?: string;
 }
 
 export async function apiRequest<T>(
@@ -11,7 +15,9 @@ export async function apiRequest<T>(
   options: RequestInit = {},
 ): Promise<T> {
   const token = localStorage.getItem("ecis-token");
+
   const controller = new AbortController();
+
   const timeout = window.setTimeout(
     () => controller.abort(),
     REQUEST_TIMEOUT_MS,
@@ -45,15 +51,20 @@ export async function apiRequest<T>(
     if (!response.ok) {
       const errorData = data as ApiErrorResponse | null;
 
-      if (response.status === 401 && token) {
+      if (response.status === 401) {
         localStorage.removeItem("ecis-token");
+
         localStorage.removeItem("ecis-user");
-        window.location.href = "/login";
+
+        if (window.location.pathname !== "/login") {
+          window.location.href = `/login?redirect=${encodeURIComponent(
+            window.location.pathname + window.location.search,
+          )}`;
+        }
       }
 
       throw new Error(
-        errorData?.message ||
-          `Request failed with status ${response.status}.`,
+        errorData?.message || `Request failed with status ${response.status}.`,
       );
     }
 
@@ -72,7 +83,9 @@ export async function apiRequest<T>(
 }
 
 export function apiGet<T>(endpoint: string): Promise<T> {
-  return apiRequest<T>(endpoint, { method: "GET" });
+  return apiRequest<T>(endpoint, {
+    method: "GET",
+  });
 }
 
 export function apiPost<T>(endpoint: string, body: unknown): Promise<T> {
@@ -90,10 +103,13 @@ export function apiPut<T>(endpoint: string, body: unknown): Promise<T> {
 }
 
 export function apiDelete<T>(endpoint: string): Promise<T> {
-  return apiRequest<T>(endpoint, { method: "DELETE" });
+  return apiRequest<T>(endpoint, {
+    method: "DELETE",
+  });
 }
 
-export function clearAuth() {
+export function clearAuth(): void {
   localStorage.removeItem("ecis-token");
+
   localStorage.removeItem("ecis-user");
 }

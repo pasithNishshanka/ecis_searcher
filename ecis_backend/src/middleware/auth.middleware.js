@@ -1,70 +1,28 @@
 const jwt = require("jsonwebtoken");
 
-const authenticate = (req, res, next) => {
+function authenticate(req, res, next) {
   try {
-    const authorization =
-      req.headers.authorization;
+    const authorization = req.headers.authorization || "";
 
-    if (!authorization) {
+    if (!authorization.startsWith("Bearer ")) {
       return res.status(401).json({
         success: false,
-        message:
-          "Authorization token is required",
+        message: "Authentication required. Please sign in.",
+        code: "AUTH_REQUIRED",
       });
     }
 
-    const parts =
-      authorization.trim().split(/\s+/);
+    const token = authorization.substring(7).trim();
 
-    if (parts.length !== 2) {
+    if (!token) {
       return res.status(401).json({
         success: false,
-        message:
-          "Authorization header must use Bearer token",
+        message: "Authentication token is missing. Please sign in again.",
+        code: "TOKEN_MISSING",
       });
     }
 
-    const [scheme, token] = parts;
-
-    if (
-      scheme.toLowerCase() !== "bearer" ||
-      !token
-    ) {
-      return res.status(401).json({
-        success: false,
-        message:
-          "Authorization header must use Bearer token",
-      });
-    }
-
-    if (!process.env.JWT_SECRET) {
-      console.error(
-        "JWT_SECRET is not configured",
-      );
-
-      return res.status(500).json({
-        success: false,
-        message:
-          "Authentication configuration error",
-      });
-    }
-
-    const decoded = jwt.verify(
-      token,
-      process.env.JWT_SECRET,
-    );
-
-    if (
-      !decoded.userId ||
-      !decoded.hospitalId ||
-      !decoded.role
-    ) {
-      return res.status(401).json({
-        success: false,
-        message:
-          "Authentication token is missing required user information",
-      });
-    }
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
     req.user = {
       userId: decoded.userId,
@@ -75,20 +33,37 @@ const authenticate = (req, res, next) => {
       department: decoded.department,
     };
 
-    next();
+    return next();
   } catch (error) {
-    console.error(
-      "Authentication middleware error:",
-      error.message,
-    );
+    if (error && error.name === "TokenExpiredError") {
+      console.warn("Authentication middleware: JWT expired.");
 
-    return res.status(401).json({
+      return res.status(401).json({
+        success: false,
+        message: "Your session has expired. Please sign in again.",
+        code: "TOKEN_EXPIRED",
+      });
+    }
+
+    if (error && error.name === "JsonWebTokenError") {
+      console.warn("Authentication middleware: invalid JWT.");
+
+      return res.status(401).json({
+        success: false,
+        message: "Your session is invalid. Please sign in again.",
+        code: "TOKEN_INVALID",
+      });
+    }
+
+    console.error("Authentication middleware error:", error);
+
+    return res.status(500).json({
       success: false,
-      message:
-        "Invalid or expired authentication token",
+      message: "Authentication service error.",
+      code: "AUTH_ERROR",
     });
   }
-};
+}
 
 module.exports = {
   authenticate,

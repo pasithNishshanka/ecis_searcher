@@ -1,9 +1,6 @@
-import {
-  computed,
-  onMounted,
-  reactive,
-  ref,
-} from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
+
+import { calculateAge } from "../utils/patient";
 
 import type {
   Patient,
@@ -13,657 +10,349 @@ import type {
   ECISFilters,
 } from "../types";
 
-
 /* ============================================================
    API
    ============================================================ */
 
-const API_BASE =
-  "http://localhost:5000/api";
-
+const API_BASE = (
+  import.meta.env.VITE_API_BASE_URL || "http://localhost:5000/api"
+).replace(/\/$/, "");
 
 function getToken(): string {
-  return (
-    localStorage.getItem(
-      "ecis-token",
-    ) || ""
-  );
+  return localStorage.getItem("ecis-token") || "";
 }
 
+function getHospitalId(): number | null {
+  try {
+    const rawUser = localStorage.getItem("ecis-user");
 
-async function request<T>(
-  path: string,
-  options: RequestInit = {},
-): Promise<T> {
-  const headers =
-    new Headers(
-      options.headers,
-    );
+    if (!rawUser) {
+      return null;
+    }
 
+    const hospitalId = Number(JSON.parse(rawUser)?.hospitalId);
 
-  headers.set(
-    "Content-Type",
-    "application/json",
-  );
+    return Number.isInteger(hospitalId) && hospitalId > 0 ? hospitalId : null;
+  } catch {
+    return null;
+  }
+}
 
+async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const headers = new Headers(options.headers);
 
-  const jwt =
-    getToken();
+  headers.set("Content-Type", "application/json");
 
+  const jwt = getToken();
 
   if (jwt) {
-    headers.set(
-      "Authorization",
-      `Bearer ${jwt}`,
-    );
+    headers.set("Authorization", `Bearer ${jwt}`);
   }
 
+  const response = await fetch(`${API_BASE}${path}`, {
+    ...options,
 
-  const response =
-    await fetch(
-      `${API_BASE}${path}`,
-      {
-        ...options,
+    headers,
+  });
 
-        headers,
-      },
-    );
+  const raw = await response.text();
 
-
-  const raw =
-    await response.text();
-
-
-  let body: any =
-    {};
-
+  let body: any = {};
 
   try {
-    body =
-      raw
-        ? JSON.parse(raw)
-        : {};
+    body = raw ? JSON.parse(raw) : {};
   } catch {
     body = {};
   }
 
-
   if (!response.ok) {
-    throw new Error(
-      body?.message ||
-        body?.error ||
-        `HTTP ${response.status}`,
-    );
+    throw new Error(body?.message || body?.error || `HTTP ${response.status}`);
   }
-
 
   return body as T;
 }
 
-
-async function apiGet<T>(
-  path: string,
-): Promise<T> {
-  return request<T>(
-    path,
-    {
-      method: "GET",
-    },
-  );
+async function apiGet<T>(path: string): Promise<T> {
+  return request<T>(path, {
+    method: "GET",
+  });
 }
 
+async function apiPost<T>(path: string, payload: unknown): Promise<T> {
+  return request<T>(path, {
+    method: "POST",
 
-async function apiPost<T>(
-  path: string,
-  payload: unknown,
-): Promise<T> {
-  return request<T>(
-    path,
-    {
-      method: "POST",
-
-      body:
-        JSON.stringify(
-          payload,
-        ),
-    },
-  );
+    body: JSON.stringify(payload),
+  });
 }
 
+async function apiPut<T>(path: string, payload: unknown): Promise<T> {
+  return request<T>(path, {
+    method: "PUT",
 
-async function apiPut<T>(
-  path: string,
-  payload: unknown,
-): Promise<T> {
-  return request<T>(
-    path,
-    {
-      method: "PUT",
-
-      body:
-        JSON.stringify(
-          payload,
-        ),
-    },
-  );
+    body: JSON.stringify(payload),
+  });
 }
-
-
-/* ============================================================
-   DEMO WARD CONFIGURATION
-   ============================================================ */
-
-function makeBeds(
-  prefix: string,
-  count: number,
-  occupied: number,
-): Ward["beds"] {
-  return Array.from(
-    {
-      length: count,
-    },
-
-    (_, index) => ({
-      id:
-        `${prefix}-${index + 1}`,
-
-      number:
-        `${prefix}-${String(
-          index + 1,
-        ).padStart(
-          2,
-          "0",
-        )}`,
-
-      status:
-        index < occupied
-          ? "OCCUPIED"
-          : "AVAILABLE",
-    }),
-  );
-}
-
-
-const demoWards:
-  Ward[] = [
-    {
-      id: "W01",
-
-      name:
-        "Medical Ward A",
-
-      department:
-        "Medicine",
-
-      floor: "1",
-
-      capacity: 30,
-
-      beds:
-        makeBeds(
-          "A",
-          30,
-          22,
-        ),
-    },
-
-    {
-      id: "W02",
-
-      name:
-        "Surgical Ward",
-
-      department:
-        "Surgery",
-
-      floor: "2",
-
-      capacity: 24,
-
-      beds:
-        makeBeds(
-          "S",
-          24,
-          17,
-        ),
-    },
-
-    {
-      id: "W03",
-
-      name:
-        "Pediatric Ward",
-
-      department:
-        "Pediatrics",
-
-      floor: "2",
-
-      capacity: 20,
-
-      beds:
-        makeBeds(
-          "P",
-          20,
-          12,
-        ),
-    },
-  ];
-
 
 /* ============================================================
    REACTIVE STATE
    ============================================================ */
 
-const db =
-  reactive<{
-    patients: Patient[];
+const db = reactive<{
+  patients: Patient[];
 
-    treatments:
-      TreatmentRecord[];
+  treatments: TreatmentRecord[];
 
-    wards: Ward[];
+  wards: Ward[];
 
-    emergencies:
-      EmergencyCase[];
-  }>({
-    patients: [],
+  emergencies: EmergencyCase[];
+}>({
+  patients: [],
 
-    treatments: [],
+  treatments: [],
 
-    wards:
-      demoWards,
+  wards: [],
 
-    emergencies: [],
-  });
+  emergencies: [],
+});
 
+const loading = ref(false);
 
-const loading =
-  ref(false);
-
-
-const loadError =
-  ref("");
-
+const loadError = ref("");
 
 /* ============================================================
    HELPERS
    ============================================================ */
 
-function responseArray(
-  response: any,
-): any[] {
-  if (
-    Array.isArray(
-      response,
-    )
-  ) {
+function responseArray(response: any): any[] {
+  if (Array.isArray(response)) {
     return response;
   }
 
-
-  if (
-    Array.isArray(
-      response?.data,
-    )
-  ) {
+  if (Array.isArray(response?.data)) {
     return response.data;
   }
 
-
-  if (
-    Array.isArray(
-      response?.rows,
-    )
-  ) {
+  if (Array.isArray(response?.rows)) {
     return response.rows;
   }
 
-
   return [];
 }
-
 
 /* ============================================================
    MAP PATIENT
    ============================================================ */
 
-function mapPatient(
-  row: any,
-): Patient {
-  const allergies =
-    Array.isArray(
-      row?.allergies,
-    )
-      ? row.allergies
-      : [];
+function mapPatient(row: any): Patient {
+  const allergies = Array.isArray(row?.allergies) ? row.allergies : [];
 
+  const foodAllergies = allergies
+    .filter((item: any) => item?.category === "FOOD")
+    .map((item: any) => String(item?.name || ""))
+    .filter(Boolean);
 
-  const foodAllergies =
-    allergies
-      .filter(
-        (
-          item: any,
-        ) =>
-          item?.category ===
-          "FOOD",
-      )
-      .map(
-        (
-          item: any,
-        ) =>
-          String(
-            item?.name || "",
-          ),
-      )
-      .filter(Boolean);
-
-
-  const medicalAllergies =
-    allergies
-      .filter(
-        (
-          item: any,
-        ) =>
-          item?.category ===
-          "MEDICAL_DRUG",
-      )
-      .map(
-        (
-          item: any,
-        ) =>
-          String(
-            item?.name || "",
-          ),
-      )
-      .filter(Boolean);
-
+  const medicalAllergies = allergies
+    .filter((item: any) => item?.category === "MEDICAL_DRUG")
+    .map((item: any) => String(item?.name || ""))
+    .filter(Boolean);
 
   return {
-    id: String(
-      row?.patient_id ??
-        row?.id ??
-        "",
-    ),
+    id: String(row?.patient_id ?? row?.id ?? ""),
 
-    patientNumber:
-      String(
-        row?.patient_number ??
-          "",
-      ),
+    patientNumber: String(row?.patient_number ?? ""),
 
-    nic:
-      row?.nic_number ??
-      "",
+    nic: row?.nic_number ?? "",
 
-    firstName:
-      row?.first_name ??
-      "",
+    firstName: row?.first_name ?? "",
 
-    lastName:
-      row?.last_name ??
-      "",
+    lastName: row?.last_name ?? "",
 
-    dateOfBirth:
-      row?.date_of_birth ??
-      "",
+    dateOfBirth: row?.date_of_birth ?? "",
 
-    gender:
-      row?.gender ??
-      "",
+    gender: row?.gender ?? "",
 
-    bloodGroup:
-      row?.blood_group ??
-      "",
+    bloodGroup: row?.blood_group ?? "",
 
-    heightCm:
-      row?.height_cm != null
-        ? Number(
-            row.height_cm,
-          )
-        : 0,
+    heightCm: row?.height_cm != null ? Number(row.height_cm) : 0,
 
-    weightKg:
-      row?.weight_kg != null
-        ? Number(
-            row.weight_kg,
-          )
-        : 0,
+    weightKg: row?.weight_kg != null ? Number(row.weight_kg) : 0,
 
-    phone:
-      row?.primary_phone ??
-      "",
+    phone: row?.primary_phone ?? "",
 
-    email:
-      row?.email ??
-      "",
+    email: row?.email ?? "",
 
-    address:
-      row?.address ??
-      "",
+    address: row?.address ?? "",
 
-    province:
-      row?.province ??
-      "",
+    province: row?.province ?? "",
 
-    district:
-      row?.district ??
-      "",
+    district: row?.district ?? "",
 
-    workplace:
-      row?.occupation ??
-      "",
+    workplace: row?.occupation ?? "",
 
     foodAllergies,
 
     medicalAllergies,
 
-    allergies:
-      [
-        ...foodAllergies,
-        ...medicalAllergies,
-      ],
+    allergies: [...foodAllergies, ...medicalAllergies],
 
-    chronicDiseases:
-      Array.isArray(
-        row?.chronicDiseases,
-      )
-        ? row.chronicDiseases
-        : [],
+    chronicDiseases: Array.isArray(row?.chronicDiseases)
+      ? row.chronicDiseases
+      : [],
 
-    registrationNotes:
-      row?.registration_notes ??
-      "",
+    registrationNotes: row?.registration_notes ?? "",
 
-    createdAt:
-      row?.created_at ??
-      row?.registered_at ??
-      "",
+    createdAt: row?.created_at ?? row?.registered_at ?? "",
   };
 }
-
 
 /* ============================================================
    MAP TREATMENT
    ============================================================ */
 
-function mapTreatment(
-  row: any,
-): TreatmentRecord {
+function mapTreatment(row: any): TreatmentRecord {
   return {
-    id: String(
-      row?.treatment_id ??
-        row?.id ??
-        "",
-    ),
+    id: String(row?.treatment_id ?? row?.id ?? ""),
 
-    patientId:
-      String(
-        row?.patient_id ??
-          row?.patientId ??
-          "",
-      ),
+    patientId: String(row?.patient_id ?? row?.patientId ?? ""),
 
-    type:
-      row?.treatment_type ??
-      row?.type ??
-      "OPD",
+    type: row?.treatment_type ?? row?.type ?? "OPD",
 
-    date:
-      row?.treatment_date ??
-      row?.date ??
-      "",
+    date: row?.treatment_date ?? row?.date ?? "",
 
-    department:
-      row?.department ??
-      "",
+    department: row?.department ?? "",
 
-    doctor:
-      row?.doctor ??
-      row?.performed_by_name ??
-      "",
+    doctor: row?.doctor ?? row?.performed_by_name ?? "",
 
-    diagnosis:
-      row?.diagnosis ??
-      "",
+    diagnosis: row?.diagnosis ?? "",
 
-    treatment:
-      row?.treatment_name ??
-      row?.treatment ??
-      "",
+    treatment: row?.treatment_name ?? row?.treatment ?? "",
 
-    notes:
-      row?.description ??
-      row?.notes ??
-      "",
+    notes: row?.description ?? row?.notes ?? "",
 
-    bodyRegion:
-      row?.body_site ??
-      "",
+    bodyRegion: row?.body_site ?? "",
 
-    clinicalFinding:
-      row?.clinicalFinding ??
-      "",
+    clinicalFinding: row?.clinicalFinding ?? "",
 
-    implant:
-      row?.implant ??
-      "",
+    implant: row?.implant ?? "",
 
-    implantSerial:
-      row?.implantSerial ??
-      "",
+    implantSerial: row?.implantSerial ?? "",
 
-    scar:
-      row?.scar ??
-      "",
+    scar: row?.scar ?? "",
 
-    oldFracture:
-      row?.oldFracture ??
-      "",
+    oldFracture: row?.oldFracture ?? "",
 
-    birthmark:
-      row?.birthmark ??
-      "",
+    birthmark: row?.birthmark ?? "",
 
-    tattoo:
-      row?.tattoo ??
-      "",
+    tattoo: row?.tattoo ?? "",
 
-    missingBodyPart:
-      row?.missingBodyPart ??
-      "",
+    missingBodyPart: row?.missingBodyPart ?? "",
   };
 }
-
 
 /* ============================================================
    MAP EMERGENCY
    ============================================================ */
 
-function mapEmergency(
-  row: any,
-): EmergencyCase {
-  const patientId =
-    row?.patient_id ??
-    row?.patientId;
+function mapEmergency(row: any): EmergencyCase {
+  const patientId = row?.patient_id ?? row?.patientId;
 
-
-  const unidentified =
-    Boolean(
-      row?.unidentified_patient ??
-        row?.unidentifiedPatient,
-    );
-
+  const unidentified = Boolean(
+    row?.unidentified_patient ?? row?.unidentifiedPatient,
+  );
 
   return {
-    id:
-      String(
-        row?.emergency_case_id ??
-          row?.case_number ??
-          row?.id ??
-          "",
-      ),
+    id: String(row?.emergency_case_id ?? row?.case_number ?? row?.id ?? ""),
 
-    patientId:
-      patientId != null
-        ? String(
-            patientId,
-          )
-        : undefined,
+    patientId: patientId != null ? String(patientId) : undefined,
 
-    arrival:
-      row?.arrival_date ??
-      row?.arrival ??
-      "",
+    arrival: row?.arrival_date ?? row?.arrival ?? "",
 
-    description:
-      row?.chief_complaint ??
-      row?.initial_condition ??
-      "",
+    description: row?.chief_complaint ?? row?.initial_condition ?? "",
 
-    department:
-      row?.department ??
-      "Emergency",
+    department: row?.department ?? "Emergency",
 
-    status:
-      unidentified
-        ? "UNIDENTIFIED"
-        : (
-            row?.status ??
-            "IN_TREATMENT"
-          ),
+    status: unidentified ? "UNIDENTIFIED" : (row?.status ?? "IN_TREATMENT"),
   };
 }
 
+function mapWard(ward: any, beds: any[]): Ward {
+  return {
+    id: String(ward?.ward_id ?? ward?.id ?? ""),
+
+    name: ward?.ward_name ?? ward?.name ?? "Unnamed ward",
+
+    department: ward?.ward_type ?? ward?.department ?? "General",
+
+    floor: String(ward?.floor ?? "—"),
+
+    capacity: Number(ward?.capacity ?? ward?.total_beds ?? beds.length),
+
+    beds: beds.map((bed) => ({
+      id: String(bed?.bed_id ?? bed?.id ?? ""),
+
+      number: String(bed?.bed_number ?? bed?.number ?? ""),
+
+      status: ["AVAILABLE", "OCCUPIED", "MAINTENANCE"].includes(bed?.status)
+        ? bed.status
+        : "MAINTENANCE",
+
+      patientId: bed?.patient_id != null ? String(bed.patient_id) : undefined,
+    })),
+  };
+}
 
 /* ============================================================
    LOAD PATIENTS
    ============================================================ */
 
 async function loadPatients() {
-  const response =
-    await apiGet<any>(
-      "/patients",
-    );
+  const response = await apiGet<any>("/patients");
 
-
-  const rows =
-    responseArray(
-      response,
-    );
-
+  const rows = responseArray(response);
 
   db.patients.splice(
     0,
 
     db.patients.length,
 
-    ...rows.map(
-      mapPatient,
-    ),
+    ...rows.map(mapPatient),
   );
 }
 
+/* ============================================================
+   LOAD WARDS AND BEDS
+   ============================================================ */
+
+async function loadWards() {
+  const hospitalId = getHospitalId();
+
+  if (!hospitalId) {
+    db.wards.splice(0, db.wards.length);
+
+    return;
+  }
+
+  try {
+    const response = await apiGet<any>(`/wards/hospital/${hospitalId}`);
+
+    const wardRows = responseArray(response);
+
+    const mappedWards = await Promise.all(
+      wardRows.map(async (ward) => {
+        const bedsResponse = await apiGet<any>(`/wards/${ward.ward_id}/beds`);
+
+        return mapWard(ward, responseArray(bedsResponse));
+      }),
+    );
+
+    db.wards.splice(0, db.wards.length, ...mappedWards);
+  } catch (error) {
+    console.warn("Ward load failed:", error);
+
+    db.wards.splice(0, db.wards.length);
+  }
+}
 
 /* ============================================================
    LOAD TREATMENTS
@@ -671,26 +360,16 @@ async function loadPatients() {
 
 async function loadTreatments() {
   try {
-    const response =
-      await apiGet<any>(
-        "/treatments",
-      );
+    const response = await apiGet<any>("/treatments");
 
-
-    const rows =
-      responseArray(
-        response,
-      );
-
+    const rows = responseArray(response);
 
     db.treatments.splice(
       0,
 
       db.treatments.length,
 
-      ...rows.map(
-        mapTreatment,
-      ),
+      ...rows.map(mapTreatment),
     );
   } catch (error) {
     /*
@@ -698,13 +377,9 @@ async function loadTreatments() {
      * Do not break patients when it fails.
      */
 
-    console.warn(
-      "Treatment load failed:",
-      error,
-    );
+    console.warn("Treatment load failed:", error);
   }
 }
-
 
 /* ============================================================
    LOAD EMERGENCIES
@@ -712,47 +387,30 @@ async function loadTreatments() {
 
 async function loadEmergencies() {
   try {
-    const response =
-      await apiGet<any>(
-        "/emergency",
-      );
+    const response = await apiGet<any>("/emergency");
 
-
-    const rows =
-      responseArray(
-        response,
-      );
-
+    const rows = responseArray(response);
 
     db.emergencies.splice(
       0,
 
       db.emergencies.length,
 
-      ...rows.map(
-        mapEmergency,
-      ),
+      ...rows.map(mapEmergency),
     );
   } catch (error) {
-    console.warn(
-      "Emergency load failed:",
-      error,
-    );
+    console.warn("Emergency load failed:", error);
   }
 }
-
 
 /* ============================================================
    LOAD EVERYTHING
    ============================================================ */
 
 async function loadBackendData() {
-  loading.value =
-    true;
+  loading.value = true;
 
-  loadError.value =
-    "";
-
+  loadError.value = "";
 
   try {
     /*
@@ -760,124 +418,55 @@ async function loadBackendData() {
      */
     await loadPatients();
   } catch (error) {
-    console.error(
-      "PATIENT LOAD FAILED:",
-      error,
-    );
-
+    console.error("PATIENT LOAD FAILED:", error);
 
     loadError.value =
-      error instanceof Error
-        ? error.message
-        : "Unable to load patients.";
+      error instanceof Error ? error.message : "Unable to load patients.";
   }
-
 
   /*
    * Other modules cannot break
    * the patient registry.
    */
-  await loadTreatments();
+  await Promise.all([loadTreatments(), loadEmergencies(), loadWards()]);
 
-  await loadEmergencies();
-
-
-  loading.value =
-    false;
+  loading.value = false;
 }
-
 
 /* ============================================================
    STORE
    ============================================================ */
 
 export function useEHR() {
-  const patients =
-    computed(
-      () =>
-        db.patients,
-    );
+  const patients = computed(() => db.patients);
 
+  const treatments = computed(() => db.treatments);
 
-  const treatments =
-    computed(
-      () =>
-        db.treatments,
-    );
+  const wards = computed(() => db.wards);
 
-
-  const wards =
-    computed(
-      () =>
-        db.wards,
-    );
-
-
-  const emergencies =
-    computed(
-      () =>
-        db.emergencies,
-    );
-
+  const emergencies = computed(() => db.emergencies);
 
   /* ----------------------------------------------------------
      FIND PATIENT
      ---------------------------------------------------------- */
 
-  function patientById(
-    id: string,
-  ) {
+  function patientById(id: string) {
     return patients.value.find(
-      (
-        patient,
-      ) =>
-        String(
-          patient.id,
-        ) ===
-          String(id) ||
-
-        String(
-          patient.patientNumber,
-        ) ===
-          String(id),
+      (patient) =>
+        String(patient.id) === String(id) ||
+        String(patient.patientNumber) === String(id),
     );
   }
-
 
   /* ----------------------------------------------------------
      PATIENT TREATMENTS
      ---------------------------------------------------------- */
 
-  function treatmentsForPatient(
-    patientId: string,
-  ) {
+  function treatmentsForPatient(patientId: string) {
     return treatments.value
-      .filter(
-        (
-          treatment,
-        ) =>
-          String(
-            treatment.patientId,
-          ) ===
-            String(
-              patientId,
-            ),
-      )
-      .sort(
-        (
-          a,
-          b,
-        ) =>
-          String(
-            b.date,
-          ).localeCompare(
-            String(
-              a.date,
-            ),
-          ),
-      );
+      .filter((treatment) => String(treatment.patientId) === String(patientId))
+      .sort((a, b) => String(b.date).localeCompare(String(a.date)));
   }
-
 
   /* ----------------------------------------------------------
      REFRESH
@@ -887,98 +476,54 @@ export function useEHR() {
     await loadBackendData();
   }
 
-
   /* ----------------------------------------------------------
      CREATE PATIENT
      ---------------------------------------------------------- */
 
   async function addPatient(
-    data: Omit<
-      Patient,
-      "id" |
-      "patientNumber" |
-      "createdAt"
-    >,
+    data: Omit<Patient, "id" | "patientNumber" | "createdAt">,
   ) {
-    const response =
-      await apiPost<any>(
-        "/patients",
-        {
-          firstName:
-            data.firstName,
+    const response = await apiPost<any>("/patients", {
+      firstName: data.firstName,
 
-          lastName:
-            data.lastName,
+      lastName: data.lastName,
 
-          nicNumber:
-            data.nic ||
-            null,
+      nicNumber: data.nic || null,
 
-          dateOfBirth:
-            data.dateOfBirth,
+      dateOfBirth: data.dateOfBirth,
 
-          gender:
-            data.gender,
+      gender: data.gender,
 
-          bloodGroup:
-            data.bloodGroup,
+      bloodGroup: data.bloodGroup,
 
-          heightCm:
-            data.heightCm ||
-            null,
+      heightCm: data.heightCm || null,
 
-          weightKg:
-            data.weightKg ||
-            null,
+      weightKg: data.weightKg || null,
 
-          primaryPhone:
-            data.phone ||
-            null,
+      primaryPhone: data.phone || null,
 
-          email:
-            data.email ||
-            null,
+      email: data.email || null,
 
-          address:
-            data.address ||
-            null,
+      address: data.address || null,
 
-          province:
-            data.province ||
-            null,
+      province: data.province || null,
 
-          district:
-            data.district ||
-            null,
+      district: data.district || null,
 
-          occupation:
-            data.workplace ||
-            null,
+      occupation: data.workplace || null,
 
-          registrationNotes:
-            data.registrationNotes ||
-            null,
+      registrationNotes: data.registrationNotes || null,
 
-          foodAllergies:
-            data.foodAllergies ||
-            [],
+      foodAllergies: data.foodAllergies || [],
 
-          medicalAllergies:
-            data.medicalAllergies ||
-            [],
+      medicalAllergies: data.medicalAllergies || [],
 
-          status:
-            "ACTIVE",
-        },
-      );
-
+      status: "ACTIVE",
+    });
 
     if (!response?.data) {
-      throw new Error(
-        "Server did not return the created patient.",
-      );
+      throw new Error("Server did not return the created patient.");
     }
-
 
     /*
      * Do NOT manually generate P000xxx.
@@ -986,580 +531,222 @@ export function useEHR() {
      */
     await loadPatients();
 
-
-    return mapPatient(
-      response.data,
-    );
+    return mapPatient(response.data);
   }
-
 
   /* ----------------------------------------------------------
      UPDATE PATIENT
      ---------------------------------------------------------- */
 
-  async function updatePatient(
-    patientId: string,
-    data: Partial<Patient>,
-  ) {
-    const response =
-      await apiPut<any>(
-        `/patients/${patientId}`,
-        {
-          firstName:
-            data.firstName,
+  async function updatePatient(patientId: string, data: Partial<Patient>) {
+    const response = await apiPut<any>(`/patients/${patientId}`, {
+      firstName: data.firstName,
 
-          lastName:
-            data.lastName,
+      lastName: data.lastName,
 
-          nicNumber:
-            data.nic ||
+      nicNumber: data.nic || undefined,
 
-            undefined,
+      dateOfBirth: data.dateOfBirth,
 
-          dateOfBirth:
-            data.dateOfBirth,
+      gender: data.gender,
 
-          gender:
-            data.gender,
+      bloodGroup: data.bloodGroup,
 
-          bloodGroup:
-            data.bloodGroup,
+      heightCm: data.heightCm,
 
-          heightCm:
-            data.heightCm,
+      weightKg: data.weightKg,
 
-          weightKg:
-            data.weightKg,
+      primaryPhone: data.phone,
 
-          primaryPhone:
-            data.phone,
+      email: data.email,
 
-          email:
-            data.email,
+      address: data.address,
 
-          address:
-            data.address,
+      province: data.province,
 
-          province:
-            data.province,
+      district: data.district,
 
-          district:
-            data.district,
+      occupation: data.workplace,
 
-          occupation:
-            data.workplace,
+      registrationNotes: data.registrationNotes,
 
-          registrationNotes:
-            data.registrationNotes,
+      foodAllergies: data.foodAllergies,
 
-          foodAllergies:
-            data.foodAllergies,
+      medicalAllergies: data.medicalAllergies,
 
-          medicalAllergies:
-            data.medicalAllergies,
-
-          status:
-            "ACTIVE",
-        },
-      );
-
+      status: "ACTIVE",
+    });
 
     if (!response?.data) {
-      throw new Error(
-        "Server did not return the updated patient.",
-      );
+      throw new Error("Server did not return the updated patient.");
     }
-
 
     await loadPatients();
 
-
-    return mapPatient(
-      response.data,
-    );
+    return mapPatient(response.data);
   }
-
 
   /* ----------------------------------------------------------
-     TEMPORARY LOCAL TREATMENT COMPATIBILITY
+     PERSIST TREATMENT RECORD
      ---------------------------------------------------------- */
 
-  function addTreatment(
-    data: Omit<
-      TreatmentRecord,
-      "id"
-    >,
-  ) {
-    db.treatments.unshift({
-      ...data,
-
-      id:
-        `LOCAL-${Date.now()}`,
+  async function addTreatment(data: Omit<TreatmentRecord, "id">) {
+    const response = await apiPost<any>("/treatments", {
+      patientId: Number(data.patientId),
+      treatmentDate: data.date || null,
+      treatmentType: data.type,
+      treatmentName: data.treatment || null,
+      description: [
+        data.diagnosis ? `Diagnosis: ${data.diagnosis}` : "",
+        data.notes || "",
+        data.clinicalFinding ? `Clinical finding: ${data.clinicalFinding}` : "",
+        data.implant ? `Implant/device: ${data.implant}` : "",
+        data.implantSerial ? `Device serial: ${data.implantSerial}` : "",
+        data.scar ? `Scar: ${data.scar}` : "",
+        data.oldFracture ? `Old fracture: ${data.oldFracture}` : "",
+        data.birthmark ? `Birthmark: ${data.birthmark}` : "",
+        data.tattoo ? `Tattoo: ${data.tattoo}` : "",
+        data.missingBodyPart
+          ? `Missing body part: ${data.missingBodyPart}`
+          : "",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+      bodySite: data.bodyRegion || null,
     });
-  }
 
+    if (!response?.data) {
+      throw new Error("Server did not return the saved treatment record.");
+    }
+
+    await loadTreatments();
+    return mapTreatment(response.data);
+  }
 
   /* ----------------------------------------------------------
      WARD
      ---------------------------------------------------------- */
 
-  function addWard(
+  async function addWard(
     name: string,
     department: string,
     floor: string,
     capacity: number,
   ) {
-    const id =
-      `W${String(
-        wards.value.length +
-          1,
-      ).padStart(
-        2,
-        "0",
-      )}`;
+    const hospitalId = getHospitalId();
 
-
-    db.wards.push({
-      id,
-
-      name,
-
-      department,
-
-      floor,
-
-      capacity,
-
-      beds: Array.from(
-        {
-          length: capacity,
-        },
-
-        (
-          _,
-          index,
-        ) => ({
-          id:
-            `${id}-${index + 1}`,
-
-          number:
-            `${name
-              .slice(
-                0,
-                1,
-              )
-              .toUpperCase()}-${String(
-              index + 1,
-            ).padStart(
-              2,
-              "0",
-            )}`,
-
-          status:
-            "AVAILABLE",
-        }),
-      ),
-    });
-  }
-
-
-  function assignBed(
-    wardId: string,
-    bedId: string,
-    patientId: string,
-  ) {
-    const ward =
-      db.wards.find(
-        (
-          item,
-        ) =>
-          item.id ===
-          wardId,
-      );
-
-
-    const bed =
-      ward?.beds.find(
-        (
-          item,
-        ) =>
-          item.id ===
-          bedId,
-      );
-
-
-    if (!bed) {
-      return;
+    if (!hospitalId) {
+      throw new Error("Authenticated hospital information is missing.");
     }
 
+    const bedCount = Math.max(1, Math.floor(capacity));
 
-    bed.status =
-      "OCCUPIED";
+    const wardCode = `WARD-${Date.now()}`;
 
-
-    bed.patientId =
-      patientId;
-  }
-
-
-  /* ----------------------------------------------------------
-     EMERGENCY
-     ---------------------------------------------------------- */
-
-  function addEmergency(
-    data: Omit<
-      EmergencyCase,
-      "id"
-    >,
-  ) {
-    db.emergencies.unshift({
-      ...data,
-
-      id:
-        `LOCAL-${Date.now()}`,
+    const response = await apiPost<any>("/wards", {
+      hospitalId,
+      wardCode,
+      wardName: name,
+      wardType: department,
+      floor,
+      capacity: bedCount,
     });
+
+    const wardId = response?.data?.ward_id;
+
+    if (!wardId) {
+      throw new Error("Server did not return the created ward.");
+    }
+
+    await Promise.all(
+      Array.from(
+        {
+          length: bedCount,
+        },
+        (_, index) =>
+          apiPost(`/wards/${wardId}/beds`, {
+            bedNumber: `${wardCode}-${String(index + 1).padStart(2, "0")}`,
+          }),
+      ),
+    );
+
+    await loadWards();
   }
 
+  async function assignBed(wardId: string, bedId: string, patientId: string) {
+    const hospitalId = getHospitalId();
+
+    if (!hospitalId) {
+      throw new Error("Authenticated hospital information is missing.");
+    }
+
+    await apiPost("/admissions", {
+      patientId: Number(patientId),
+      hospitalId,
+      wardId: Number(wardId),
+      bedId: Number(bedId),
+      admissionNumber: `ADM-${Date.now()}`,
+    });
+
+    await loadWards();
+  }
 
   /* ----------------------------------------------------------
-     ECIS LOCAL FALLBACK
+     PERSIST EMERGENCY CASE
      ---------------------------------------------------------- */
 
-  function searchECIS(
-    filters: ECISFilters,
+  async function addEmergency(
+    data: Omit<EmergencyCase, "id"> & Record<string, any>,
   ) {
-    const getAge =
-      (
-        dateString: string,
-      ) => {
-        const timestamp =
-          new Date(
-            dateString,
-          ).getTime();
+    const response = await apiPost<any>("/emergency", {
+      caseNumber: data.caseNumber || `EMG-${Date.now()}`,
+      patientId: data.patientId ? Number(data.patientId) : null,
+      arrivalDate: data.arrival || new Date().toISOString(),
+      arrivalMode: data.arrivalMode || "WALK_IN",
+      triageLevel: data.triageLevel || null,
+      chiefComplaint:
+        data.chiefComplaint || data.description || "Emergency presentation",
+      initialCondition: data.initialCondition || null,
+      unidentifiedPatient: !data.patientId,
+      temporaryIdentityReference: data.temporaryIdentityReference || null,
+    });
 
-
-        if (
-          Number.isNaN(
-            timestamp,
-          )
-        ) {
-          return 0;
-        }
-
-
-        return Math.floor(
-          (
-            Date.now() -
-            timestamp
-          ) /
-            31557600000,
-        );
-      };
-
-
-    return patients.value
-      .map(
-        (
-          patient,
-        ) => {
-          const records =
-            treatmentsForPatient(
-              patient.id,
-            );
-
-
-          const clinicalText =
-            records
-              .map(
-                (
-                  record,
-                ) =>
-                  [
-                    record
-                      .diagnosis,
-
-                    record
-                      .treatment,
-
-                    record
-                      .notes,
-
-                    record
-                      .bodyRegion,
-
-                    record
-                      .clinicalFinding,
-
-                    record
-                      .implant,
-
-                    record
-                      .scar,
-
-                    record
-                      .oldFracture,
-
-                    record
-                      .birthmark,
-
-                    record
-                      .tattoo,
-
-                    record
-                      .missingBodyPart,
-                  ]
-                    .filter(
-                      Boolean,
-                    )
-                    .join(
-                      " ",
-                    ),
-              )
-              .join(
-                " ",
-              )
-              .toLowerCase();
-
-
-          let score =
-            0;
-
-
-          const evidence:
-            string[] = [];
-
-
-          const patientAge =
-            getAge(
-              patient
-                .dateOfBirth,
-            );
-
-
-          if (
-            (
-              filters.ageMin !=
-                null ||
-              filters.ageMax !=
-                null
-            ) &&
-            (
-              filters.ageMin ==
-                null ||
-              patientAge >=
-                filters.ageMin
-            ) &&
-            (
-              filters.ageMax ==
-                null ||
-              patientAge <=
-                filters.ageMax
-            )
-          ) {
-            score += 10;
-
-            evidence.push(
-              "Age",
-            );
-          }
-
-
-          if (
-            filters.bloodGroup &&
-            patient.bloodGroup ===
-              filters.bloodGroup
-          ) {
-            score += 12;
-
-            evidence.push(
-              "Blood group",
-            );
-          }
-
-
-          if (
-            filters.gender &&
-            patient.gender ===
-              filters.gender
-          ) {
-            score += 7;
-
-            evidence.push(
-              "Gender",
-            );
-          }
-
-
-          if (
-            filters.name &&
-            `
-              ${patient.firstName}
-              ${patient.lastName}
-              ${patient.patientNumber}
-            `
-              .toLowerCase()
-              .includes(
-                filters.name
-                  .toLowerCase(),
-              )
-          ) {
-            score += 12;
-
-            evidence.push(
-              "Name",
-            );
-          }
-
-
-          if (
-            filters.workplace &&
-            patient.workplace
-              .toLowerCase()
-              .includes(
-                filters.workplace
-                  .toLowerCase(),
-              )
-          ) {
-            score += 8;
-
-            evidence.push(
-              "Workplace",
-            );
-          }
-
-
-          const clues = [
-            [
-              filters.procedure,
-              18,
-              "Procedure",
-            ],
-
-            [
-              filters.implant,
-              18,
-              "Implant/device",
-            ],
-
-            [
-              filters.finding,
-              15,
-              "Clinical finding",
-            ],
-
-            [
-              filters.bodyRegion,
-              12,
-              "Body region",
-            ],
-
-            [
-              filters.scar,
-              15,
-              "Scar",
-            ],
-
-            [
-              filters.birthmark,
-              12,
-              "Birthmark",
-            ],
-
-            [
-              filters.tattoo,
-              10,
-              "Tattoo",
-            ],
-
-            [
-              filters.missingBodyPart,
-              15,
-              "Missing body part",
-            ],
-
-            [
-              filters.fracture,
-              15,
-              "Fracture",
-            ],
-          ] as Array<
-            [
-              string |
-                undefined,
-
-              number,
-
-              string,
-            ]
-          >;
-
-
-          for (
-            const [
-              clue,
-              weight,
-              label,
-            ] of clues
-          ) {
-            if (
-              clue &&
-              clinicalText.includes(
-                clue.toLowerCase(),
-              )
-            ) {
-              score +=
-                weight;
-
-              evidence.push(
-                label,
-              );
-            }
-          }
-
-
-          if (
-            filters.hasSurgery &&
-            !records.some(
-              (
-                record,
-              ) =>
-                record.type ===
-                "SURGERY",
-            )
-          ) {
-            score =
-              0;
-          }
-
-
-          return {
-            patient,
-
-            score,
-
-            evidence,
-
-            records,
-          };
-        },
-      )
-      .filter(
-        (
-          item,
-        ) =>
-          item.score >
-          0,
-      )
-      .sort(
-        (
-          a,
-          b,
-        ) =>
-          b.score -
-          a.score,
-      );
+    await loadEmergencies();
+    return response?.data;
   }
 
+  /* ----------------------------------------------------------
+     ECIS SEARCH
+     ---------------------------------------------------------- */
+
+  async function searchECIS(filters: ECISFilters) {
+    const payload = {
+      ageMin: filters.ageMin,
+      ageMax: filters.ageMax,
+      heightMin: filters.heightMin,
+      heightMax: filters.heightMax,
+      weightMin: filters.weightMin,
+      weightMax: filters.weightMax,
+      bloodGroup: filters.bloodGroup,
+      gender: filters.gender,
+      province: filters.province,
+      district: filters.district,
+      partialName: filters.name,
+      phoneFragment: filters.phoneDigits,
+      workplace: filters.workplace,
+      previousSurgery: filters.procedure,
+      implantOrDevice: filters.implant,
+      clinicalObservation: filters.finding,
+      bodyRegion: filters.bodyRegion,
+      missingBodyPart: filters.missingBodyPart,
+      scar: filters.scar,
+      birthmark: filters.birthmark,
+      tattoo: filters.tattoo,
+      fracture: filters.fracture,
+    };
+
+    return apiPost<any>("/ecis/search", payload);
+  }
 
   /*
    * Initial load.
@@ -1567,7 +754,6 @@ export function useEHR() {
   onMounted(() => {
     void refresh();
   });
-
 
   return {
     patients,

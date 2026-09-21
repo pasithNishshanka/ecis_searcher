@@ -20,18 +20,42 @@ const ecisRoutes = require("./routes/ecis.routes");
 const ecisReviewRoutes = require("./routes/ecisReview.routes");
 const ecisConfirmationRoutes = require("./routes/ecisConfirmation.routes");
 const authRoutes = require("./routes/auth.routes");
+
 const errorHandler = require("./middleware/error.middleware");
+const { authenticate } = require("./middleware/auth.middleware");
 
 const app = express();
 
+const configuredOrigins = String(
+  process.env.FRONTEND_ORIGINS || "http://localhost:5173",
+)
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
 app.use(
   cors({
-    origin: true,
+    origin(origin, callback) {
+      if (
+        !origin ||
+        configuredOrigins.includes("*") ||
+        configuredOrigins.includes(origin)
+      ) {
+        return callback(null, true);
+      }
+
+      return callback(new Error("Origin is not allowed by CORS."));
+    },
+
     credentials: true,
   }),
 );
 
-app.use(express.json());
+app.use(
+  express.json({
+    limit: "2mb",
+  }),
+);
 
 app.get("/api/health", (req, res) => {
   res.status(200).json({
@@ -39,6 +63,12 @@ app.get("/api/health", (req, res) => {
     message: "ECIS backend is running",
   });
 });
+
+// Public authentication endpoints.
+app.use("/api/auth", authRoutes);
+
+// Everything else requires JWT.
+app.use("/api", authenticate);
 
 app.use("/api/patients", patientRoutes);
 
@@ -75,8 +105,6 @@ app.use("/api/ecis", ecisRoutes);
 app.use("/api/ecis", ecisReviewRoutes);
 
 app.use("/api/ecis", ecisConfirmationRoutes);
-
-app.use("/api/auth", authRoutes);
 
 app.use(errorHandler);
 

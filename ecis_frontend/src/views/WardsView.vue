@@ -208,9 +208,9 @@ const patientMatches = computed(() => patients.value.filter(p => `${p.firstName}
 function occ(w: any) { return w.beds.filter((b: any) => b.status === 'OCCUPIED').length }
 function patientName(id: string) { const p = patients.value.find(x => x.id === id); return p ? `${p.firstName} ${p.lastName}` : 'Unknown patient' }
 function age(d: string) { return Math.floor((Date.now() - new Date(d).getTime()) / 31557600000) }
-function saveWard() { addWard(wf.name, wf.department, wf.floor, wf.capacity); showWardForm.value = false; Object.assign(wf, { name: '', department: 'Medicine', floor: '1', capacity: 20 }) }
+async function saveWard() { try { await addWard(wf.name, wf.department, wf.floor, wf.capacity); showWardForm.value = false; Object.assign(wf, { name: '', department: 'Medicine', floor: '1', capacity: 20 }) } catch (error) { window.alert(error instanceof Error ? error.message : 'Unable to create ward.') } }
 function openAssignment(w: any, b: any) { assignment.value = { w, b }; patientSearch.value = ''; selectedPatient.value = '' }
-function assign() { if (!assignment.value || !selectedPatient.value) return; assignBed(assignment.value.w.id, assignment.value.b.id, selectedPatient.value); assignment.value = null; patientSearch.value = ''; selectedPatient.value = '' }
+async function assign() { if (!assignment.value || !selectedPatient.value) return; try { await assignBed(assignment.value.w.id, assignment.value.b.id, selectedPatient.value); assignment.value = null; patientSearch.value = ''; selectedPatient.value = '' } catch (error) { window.alert(error instanceof Error ? error.message : 'Unable to assign patient to the bed.') } }
 function viewPatient(id: string) { patientDetail.value = patients.value.find(p => p.id === id) || null }
 function scrollToWard(id: string) { document.getElementById(`ward-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }
 </script>

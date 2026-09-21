@@ -1,6 +1,10 @@
 const express = require("express");
 
 const {
+  authenticate,
+} = require("../middleware/auth.middleware");
+
+const {
   createTreatment,
   getAllTreatments,
   getPatientTreatments,
@@ -8,6 +12,8 @@ const {
 } = require("../controllers/treatment.controller");
 
 const router = express.Router();
+
+router.use(authenticate);
 
 router.post("/", createTreatment);
 
