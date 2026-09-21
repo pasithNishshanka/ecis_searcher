@@ -1,7 +1,9 @@
 <template>
   <div class="grid min-h-screen place-items-center bg-slate-100 p-5">
     <div class="card w-full max-w-md p-7">
-      <div class="mx-auto grid size-14 place-items-center rounded-2xl bg-teal-700 text-xl text-white">
+      <div
+        class="mx-auto grid size-14 place-items-center rounded-2xl bg-teal-700 text-xl text-white"
+      >
         ✚
       </div>
 
@@ -13,13 +15,21 @@
         Authorized clinical staff portal
       </p>
 
-      <form class="mt-7 space-y-4" @submit.prevent="login">
+      <form
+        class="mt-7 space-y-4"
+        @submit.prevent="login"
+      >
         <div>
           <label class="label">
             Staff ID
           </label>
 
-          <input v-model="staff" class="field" required autocomplete="username" />
+          <input
+            v-model="staff"
+            class="field"
+            required
+            autocomplete="username"
+          />
         </div>
 
         <div>
@@ -27,14 +37,27 @@
             Password
           </label>
 
-          <input v-model="password" type="password" class="field" required autocomplete="current-password" />
+          <input
+            v-model="password"
+            type="password"
+            class="field"
+            required
+            autocomplete="current-password"
+          />
         </div>
 
-        <p v-if="error" class="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
+        <p
+          v-if="error"
+          class="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600"
+        >
           {{ error }}
         </p>
 
-        <button type="submit" class="btn-primary w-full" :disabled="loading">
+        <button
+          type="submit"
+          class="btn-primary w-full"
+          :disabled="loading"
+        >
           {{
             loading
               ? "Signing in..."
@@ -52,24 +75,37 @@
 
 <script setup lang="ts">
 import { ref } from "vue";
+
 import {
   useRoute,
   useRouter,
 } from "vue-router";
 
-import { apiPost } from "../services/api";
+import {
+  apiPost,
+} from "../services/api";
 
-const router = useRouter();
-const route = useRoute();
+const router =
+  useRouter();
 
-const staff = ref("");
-const password = ref("");
+const route =
+  useRoute();
 
-const loading = ref(false);
-const error = ref("");
+const staff =
+  ref("");
+
+const password =
+  ref("");
+
+const loading =
+  ref(false);
+
+const error =
+  ref("");
 
 async function login() {
   error.value = "";
+
   loading.value = true;
 
   try {
@@ -79,6 +115,7 @@ async function login() {
         {
           username:
             staff.value.trim(),
+
           password:
             password.value,
         },
@@ -87,10 +124,17 @@ async function login() {
     const token =
       result?.data?.token;
 
+    const refreshToken =
+      result?.data?.refreshToken;
+
     const user =
       result?.data?.user;
 
-    if (!token || !user) {
+    if (
+      !token ||
+      !refreshToken ||
+      !user
+    ) {
       throw new Error(
         "Login succeeded but authentication data was not returned.",
       );
@@ -102,6 +146,11 @@ async function login() {
     );
 
     localStorage.setItem(
+      "ecis-refresh-token",
+      refreshToken,
+    );
+
+    localStorage.setItem(
       "ecis-user",
       JSON.stringify(user),
     );
@@ -109,12 +158,12 @@ async function login() {
     const redirect =
       typeof route.query
         .redirect === "string" &&
-        route.query.redirect.startsWith(
-          "/",
-        ) &&
-        !route.query.redirect.startsWith(
-          "//",
-        )
+      route.query.redirect.startsWith(
+        "/",
+      ) &&
+      !route.query.redirect.startsWith(
+        "//",
+      )
         ? route.query.redirect
         : "/dashboard";
 

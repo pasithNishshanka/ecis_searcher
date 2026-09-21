@@ -1,23 +1,31 @@
-const express = require('express');
+const express = require("express");
 
 const {
   createAdmission,
   getPatientAdmissions,
   getAdmissionById,
-} = require('../controllers/admission.controller');
+} = require("../controllers/admission.controller");
 
 const router = express.Router();
 
-router.post('/', createAdmission);
+/*
+ * Authentication is already applied globally
+ * in app.js before /api routes.
+ */
 
-router.get(
-  '/patient/:patientId',
-  getPatientAdmissions
+router.post(
+  "/",
+  createAdmission,
 );
 
 router.get(
-  '/:admissionId',
-  getAdmissionById
+  "/patient/:patientId",
+  getPatientAdmissions,
+);
+
+router.get(
+  "/:admissionId",
+  getAdmissionById,
 );
 
 module.exports = router;

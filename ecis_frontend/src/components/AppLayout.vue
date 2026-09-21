@@ -25,15 +25,7 @@
         </nav>
 
         <div class="shrink-0 border-t border-slate-100 bg-white p-4">
-          <div class="rounded-xl bg-teal-50 p-3">
-            <div class="flex items-center gap-2">
-              <Database :size="16" class="text-teal-700" />
-              <p class="text-xs font-bold text-teal-900">ECIS workflow</p>
-            </div>
-            <p class="mt-1 text-[11px] leading-5 text-teal-700">
-              ECIS searches existing clinical records. It does not create a duplicate patient database.
-            </p>
-          </div>
+          
         </div>
       </div>
     </aside>

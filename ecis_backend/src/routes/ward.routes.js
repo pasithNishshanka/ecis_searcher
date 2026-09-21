@@ -9,6 +9,14 @@ const {
 
 const router = express.Router();
 
+/*
+ * Authentication is already applied globally in app.js:
+ *
+ * app.use("/api", authenticate);
+ *
+ * Therefore these routes receive req.user.
+ */
+
 router.post("/", createWard);
 
 router.get("/hospital/:hospitalId", getWardsByHospital);

@@ -1,17 +1,20 @@
 const pool = require("../config/database");
 
 /**
- * Create a ward admission and assign a bed.
+ * Create an inpatient admission and assign the selected bed.
  *
- * The following operations are treated as one transaction:
+ * Everything happens inside one database transaction:
  *
- * 1. Validate patient
- * 2. Lock and validate bed
- * 3. Create encounter
- * 4. Create admission
- * 5. Mark bed as occupied
+ * 1. Verify patient.
+ * 2. Verify ward.
+ * 3. Lock bed.
+ * 4. Verify bed availability.
+ * 5. Verify patient has no active admission.
+ * 6. Create encounter.
+ * 7. Create admission.
+ * 8. Mark bed as occupied.
  *
- * If one operation fails, everything is rolled back.
+ * If anything fails, everything is rolled back.
  */
 async function createAdmission(admissionData) {
   const {
@@ -31,10 +34,11 @@ async function createAdmission(admissionData) {
   try {
     await client.query("BEGIN");
 
-    // --------------------------------------------------
-    // 1. Verify patient exists and belongs to hospital
-    // --------------------------------------------------
-
+    /*
+     * --------------------------------------------------------
+     * 1. Verify patient belongs to authenticated hospital
+     * --------------------------------------------------------
+     */
     const patientResult = await client.query(
       `
         SELECT
@@ -50,17 +54,23 @@ async function createAdmission(admissionData) {
           AND status = 'ACTIVE'
         FOR SHARE;
       `,
-      [patientId, hospitalId],
+      [
+        patientId,
+        hospitalId,
+      ],
     );
 
     if (patientResult.rowCount === 0) {
-      throw new Error("Active patient not found for the selected hospital");
+      throw new Error(
+        "Active patient not found for the selected hospital",
+      );
     }
 
-    // --------------------------------------------------
-    // 2. Verify ward belongs to hospital
-    // --------------------------------------------------
-
+    /*
+     * --------------------------------------------------------
+     * 2. Verify ward belongs to authenticated hospital
+     * --------------------------------------------------------
+     */
     const wardResult = await client.query(
       `
         SELECT
@@ -76,172 +86,229 @@ async function createAdmission(admissionData) {
           AND is_active = TRUE
         FOR SHARE;
       `,
-      [wardId, hospitalId],
+      [
+        wardId,
+        hospitalId,
+      ],
     );
 
     if (wardResult.rowCount === 0) {
-      throw new Error("Active ward not found for the selected hospital");
+      throw new Error(
+        "Active ward not found for the selected hospital",
+      );
     }
 
-    // --------------------------------------------------
-    // 3. Lock the selected bed
-    // --------------------------------------------------
-    // FOR UPDATE prevents another transaction from
-    // changing/assigning the same bed simultaneously.
-
+    /*
+     * --------------------------------------------------------
+     * 3. Lock selected bed
+     * --------------------------------------------------------
+     */
     const bedResult = await client.query(
       `
         SELECT
-          bed_id,
-          ward_id,
-          bed_number,
-          status
-        FROM beds
+          b.bed_id,
+          b.ward_id,
+          b.bed_number,
+          b.bed_type,
+          b.status
+        FROM beds b
+        INNER JOIN wards w
+          ON w.ward_id = b.ward_id
         WHERE
-          bed_id = $1
-          AND ward_id = $2
+          b.bed_id = $1
+          AND b.ward_id = $2
+          AND w.hospital_id = $3
+          AND w.is_active = TRUE
         FOR UPDATE;
       `,
-      [bedId, wardId],
+      [
+        bedId,
+        wardId,
+        hospitalId,
+      ],
     );
 
     if (bedResult.rowCount === 0) {
-      throw new Error("Selected bed does not belong to the selected ward");
+      throw new Error(
+        "Selected bed does not belong to the selected ward",
+      );
     }
 
     const bed = bedResult.rows[0];
 
+    /*
+     * --------------------------------------------------------
+     * 4. Make sure bed is actually available
+     * --------------------------------------------------------
+     */
     if (bed.status !== "AVAILABLE") {
       throw new Error(
         `Selected bed is not available. Current status: ${bed.status}`,
       );
     }
 
-    // --------------------------------------------------
-    // 4. Check that patient doesn't already have
-    //    an active admission
-    // --------------------------------------------------
-
-    const activeAdmissionResult = await client.query(
-      `
-        SELECT admission_id
-        FROM admissions
-        WHERE
-          patient_id = $1
-          AND status = 'ADMITTED'
-        LIMIT 1;
-      `,
-      [patientId],
-    );
+    /*
+     * --------------------------------------------------------
+     * 5. Make sure patient has no active admission
+     * --------------------------------------------------------
+     */
+    const activeAdmissionResult =
+      await client.query(
+        `
+          SELECT
+            admission_id,
+            admission_number,
+            ward_id,
+            bed_id
+          FROM admissions
+          WHERE
+            patient_id = $1
+            AND status = 'ADMITTED'
+          LIMIT 1
+          FOR SHARE;
+        `,
+        [patientId],
+      );
 
     if (activeAdmissionResult.rowCount > 0) {
-      throw new Error("Patient already has an active admission");
+      throw new Error(
+        "Patient already has an active admission",
+      );
     }
 
-    // --------------------------------------------------
-    // 5. Create ward encounter
-    // --------------------------------------------------
+    /*
+     * --------------------------------------------------------
+     * 6. Create encounter
+     * --------------------------------------------------------
+     */
+    const encounterResult =
+      await client.query(
+        `
+          INSERT INTO encounters (
+            patient_id,
+            hospital_id,
+            encounter_type,
+            encounter_date,
+            department,
+            status,
+            chief_complaint,
+            notes
+          )
+          VALUES (
+            $1,
+            $2,
+            'WARD',
+            COALESCE(
+              $3::timestamp,
+              CURRENT_TIMESTAMP
+            ),
+            'Ward',
+            'OPEN',
+            $4,
+            $5
+          )
+          RETURNING encounter_id;
+        `,
+        [
+          patientId,
+          hospitalId,
+          admissionDate || null,
+          admissionReason || null,
+          admissionDiagnosis || null,
+        ],
+      );
 
-    const encounterResult = await client.query(
-      `
-        INSERT INTO encounters (
-          patient_id,
-          hospital_id,
-          encounter_type,
-          encounter_date,
-          department,
-          status,
-          chief_complaint,
-          notes
-        )
-        VALUES (
-          $1,
-          $2,
-          'WARD',
-          COALESCE($3::timestamp, CURRENT_TIMESTAMP),
-          'Ward',
-          'OPEN',
-          $4,
-          $5
-        )
-        RETURNING encounter_id;
-      `,
-      [
-        patientId,
-        hospitalId,
-        admissionDate || null,
-        admissionReason || null,
-        admissionDiagnosis || null,
-      ],
-    );
+    const encounterId =
+      encounterResult.rows[0].encounter_id;
 
-    const encounterId = encounterResult.rows[0].encounter_id;
+    /*
+     * --------------------------------------------------------
+     * 7. Create admission
+     * --------------------------------------------------------
+     */
+    const admissionResult =
+      await client.query(
+        `
+          INSERT INTO admissions (
+            patient_id,
+            encounter_id,
+            ward_id,
+            bed_id,
+            admission_number,
+            admission_date,
+            admission_reason,
+            admission_diagnosis,
+            attending_doctor_id,
+            status
+          )
+          VALUES (
+            $1,
+            $2,
+            $3,
+            $4,
+            $5,
+            COALESCE(
+              $6::timestamp,
+              CURRENT_TIMESTAMP
+            ),
+            $7,
+            $8,
+            $9,
+            'ADMITTED'
+          )
+          RETURNING *;
+        `,
+        [
+          patientId,
+          encounterId,
+          wardId,
+          bedId,
+          admissionNumber,
+          admissionDate || null,
+          admissionReason || null,
+          admissionDiagnosis || null,
+          attendingDoctorId || null,
+        ],
+      );
 
-    // --------------------------------------------------
-    // 6. Create admission
-    // --------------------------------------------------
+    const admission =
+      admissionResult.rows[0];
 
-    const admissionResult = await client.query(
-      `
-        INSERT INTO admissions (
-          patient_id,
-          encounter_id,
-          ward_id,
-          bed_id,
-          admission_number,
-          admission_date,
-          admission_reason,
-          admission_diagnosis,
-          attending_doctor_id,
-          status
-        )
-        VALUES (
-          $1,
-          $2,
-          $3,
-          $4,
-          $5,
-          COALESCE($6::timestamp, CURRENT_TIMESTAMP),
-          $7,
-          $8,
-          $9,
-          'ADMITTED'
-        )
-        RETURNING *;
-      `,
-      [
-        patientId,
-        encounterId,
-        wardId,
-        bedId,
-        admissionNumber,
-        admissionDate || null,
-        admissionReason || null,
-        admissionDiagnosis || null,
-        attendingDoctorId || null,
-      ],
-    );
+    /*
+     * --------------------------------------------------------
+     * 8. Mark bed occupied
+     * --------------------------------------------------------
+     *
+     * The bed was locked above, so another admission
+     * cannot take it while this transaction is running.
+     */
+    const occupiedResult =
+      await client.query(
+        `
+          UPDATE beds
+          SET
+            status = 'OCCUPIED',
+            updated_at = CURRENT_TIMESTAMP
+          WHERE
+            bed_id = $1
+            AND ward_id = $2
+            AND status = 'AVAILABLE'
+          RETURNING
+            bed_id,
+            bed_number,
+            status;
+        `,
+        [
+          bedId,
+          wardId,
+        ],
+      );
 
-    const admission = admissionResult.rows[0];
-
-    // --------------------------------------------------
-    // 7. Mark bed occupied
-    // --------------------------------------------------
-
-    await client.query(
-      `
-        UPDATE beds
-        SET
-          status = 'OCCUPIED',
-          updated_at = CURRENT_TIMESTAMP
-        WHERE bed_id = $1;
-      `,
-      [bedId],
-    );
-
-    // --------------------------------------------------
-    // 8. Commit
-    // --------------------------------------------------
+    if (occupiedResult.rowCount === 0) {
+      throw new Error(
+        "Unable to mark the selected bed as occupied.",
+      );
+    }
 
     await client.query("COMMIT");
 
@@ -249,9 +316,12 @@ async function createAdmission(admissionData) {
       encounterId,
       admission,
       bed: {
-        bedId: bed.bed_id,
-        bedNumber: bed.bed_number,
-        status: "OCCUPIED",
+        bedId:
+          occupiedResult.rows[0].bed_id,
+        bedNumber:
+          occupiedResult.rows[0].bed_number,
+        status:
+          occupiedResult.rows[0].status,
       },
     };
   } catch (error) {
@@ -263,9 +333,12 @@ async function createAdmission(admissionData) {
 }
 
 /**
- * Get all admissions for a patient.
+ * Get admissions for a patient within the authenticated hospital.
  */
-async function getPatientAdmissions(patientId) {
+async function getPatientAdmissions(
+  hospitalId,
+  patientId,
+) {
   const query = `
     SELECT
       a.admission_id,
@@ -301,34 +374,46 @@ async function getPatientAdmissions(patientId) {
     FROM admissions a
 
     INNER JOIN encounters e
-      ON a.encounter_id = e.encounter_id
+      ON e.encounter_id = a.encounter_id
 
     INNER JOIN wards w
-      ON a.ward_id = w.ward_id
+      ON w.ward_id = a.ward_id
 
     INNER JOIN beds b
-      ON a.bed_id = b.bed_id
+      ON b.bed_id = a.bed_id
 
     LEFT JOIN hospital_users u
-      ON a.attending_doctor_id = u.user_id
+      ON u.user_id = a.attending_doctor_id
 
     INNER JOIN hospitals h
-      ON w.hospital_id = h.hospital_id
+      ON h.hospital_id = w.hospital_id
 
-    WHERE a.patient_id = $1
+    WHERE
+      a.patient_id = $1
+      AND w.hospital_id = $2
 
-    ORDER BY a.admission_date DESC;
+    ORDER BY
+      a.admission_date DESC;
   `;
 
-  const result = await pool.query(query, [patientId]);
+  const result = await pool.query(
+    query,
+    [
+      patientId,
+      hospitalId,
+    ],
+  );
 
   return result.rows;
 }
 
 /**
- * Get one admission.
+ * Get one admission belonging to the authenticated hospital.
  */
-async function getAdmissionById(admissionId) {
+async function getAdmissionById(
+  hospitalId,
+  admissionId,
+) {
   const query = `
     SELECT
       a.admission_id,
@@ -351,6 +436,7 @@ async function getAdmissionById(admissionId) {
       p.last_name,
 
       w.ward_id,
+      w.ward_code,
       w.ward_name,
 
       b.bed_id,
@@ -359,29 +445,38 @@ async function getAdmissionById(admissionId) {
       u.user_id AS doctor_id,
       u.full_name AS doctor_name,
 
+      h.hospital_id,
       h.hospital_name
 
     FROM admissions a
 
     INNER JOIN patients p
-      ON a.patient_id = p.patient_id
+      ON p.patient_id = a.patient_id
 
     INNER JOIN wards w
-      ON a.ward_id = w.ward_id
+      ON w.ward_id = a.ward_id
 
     INNER JOIN beds b
-      ON a.bed_id = b.bed_id
+      ON b.bed_id = a.bed_id
 
     LEFT JOIN hospital_users u
-      ON a.attending_doctor_id = u.user_id
+      ON u.user_id = a.attending_doctor_id
 
     INNER JOIN hospitals h
-      ON w.hospital_id = h.hospital_id
+      ON h.hospital_id = w.hospital_id
 
-    WHERE a.admission_id = $1;
+    WHERE
+      a.admission_id = $1
+      AND w.hospital_id = $2;
   `;
 
-  const result = await pool.query(query, [admissionId]);
+  const result = await pool.query(
+    query,
+    [
+      admissionId,
+      hospitalId,
+    ],
+  );
 
   return result.rows[0] || null;
 }
