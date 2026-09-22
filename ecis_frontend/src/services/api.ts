@@ -23,7 +23,7 @@ interface RefreshResponse {
 /*
  * Only ONE refresh request can run at a time.
  *
- * If several API requests receive 401 together,
+ * If several API requests need a refresh at the same time,
  * they all wait for this same promise.
  */
 let refreshPromise:
@@ -32,18 +32,43 @@ let refreshPromise:
 
 let redirectingToLogin = false;
 
+
+/* ============================================================
+   AUTH STORAGE
+   ============================================================ */
+
 function getAccessToken():
   string | null {
-  return localStorage.getItem(
-    "ecis-token",
-  );
+  const token =
+    localStorage.getItem(
+      "ecis-token",
+    );
+
+  if (
+    !token ||
+    !token.trim()
+  ) {
+    return null;
+  }
+
+  return token.trim();
 }
 
 function getRefreshToken():
   string | null {
-  return localStorage.getItem(
-    "ecis-refresh-token",
-  );
+  const token =
+    localStorage.getItem(
+      "ecis-refresh-token",
+    );
+
+  if (
+    !token ||
+    !token.trim()
+  ) {
+    return null;
+  }
+
+  return token.trim();
 }
 
 function saveAccessToken(
@@ -77,6 +102,11 @@ function clearAuthentication(): void {
   );
 }
 
+
+/* ============================================================
+   LOGIN REDIRECT
+   ============================================================ */
+
 function redirectToLogin(): void {
   if (
     redirectingToLogin ||
@@ -97,6 +127,11 @@ function redirectToLogin(): void {
       currentPath,
     )}`;
 }
+
+
+/* ============================================================
+   REFRESH ACCESS TOKEN
+   ============================================================ */
 
 async function refreshAccessToken():
   Promise<string | null> {
@@ -145,22 +180,36 @@ async function refreshAccessToken():
     const newToken =
       data?.data?.token;
 
-    if (!newToken) {
+    if (
+      !newToken ||
+      !newToken.trim()
+    ) {
       clearAuthentication();
 
       return null;
     }
 
     saveAccessToken(
-      newToken,
+      newToken.trim(),
       data?.data?.user,
     );
 
-    return newToken;
+    return newToken.trim();
   } catch {
+    /*
+     * Network failure while refreshing should not
+     * immediately destroy the existing refresh token.
+     *
+     * This allows a later request to retry refresh.
+     */
     return null;
   }
 }
+
+
+/* ============================================================
+   SINGLE REFRESH QUEUE
+   ============================================================ */
 
 async function getNewAccessToken():
   Promise<string | null> {
@@ -178,6 +227,11 @@ async function getNewAccessToken():
   return refreshPromise;
 }
 
+
+/* ============================================================
+   RAW REQUEST
+   ============================================================ */
+
 async function request(
   endpoint: string,
   options: RequestInit,
@@ -191,7 +245,8 @@ async function request(
 
   const timeout =
     window.setTimeout(
-      () => controller.abort(),
+      () =>
+        controller.abort(),
       REQUEST_TIMEOUT_MS,
     );
 
@@ -252,12 +307,41 @@ async function request(
   }
 }
 
+
+/* ============================================================
+   MAIN API REQUEST
+   ============================================================ */
+
 export async function apiRequest<T>(
   endpoint: string,
   options: RequestInit = {},
 ): Promise<T> {
+  /*
+   * Get the existing short-lived access token.
+   */
   let token =
     getAccessToken();
+
+  /*
+   * IMPORTANT FIX:
+   *
+   * If the access token is missing but a refresh token
+   * still exists, refresh BEFORE sending the protected
+   * request.
+   *
+   * This prevents:
+   *
+   *     AUTH_REQUIRED
+   *
+   * when the browser still has a valid refresh session.
+   */
+  if (
+    !token &&
+    getRefreshToken()
+  ) {
+    token =
+      await getNewAccessToken();
+  }
 
   /*
    * First request.
@@ -270,14 +354,13 @@ export async function apiRequest<T>(
     );
 
   /*
-   * Access token expired/invalid.
+   * Access token expired or invalid.
    *
    * Try refresh BEFORE logging the user out.
    */
   if (
     result.response.status ===
-      401 &&
-    token
+      401
   ) {
     const errorData =
       result.data as
@@ -288,9 +371,20 @@ export async function apiRequest<T>(
       errorData?.code ===
         "TOKEN_EXPIRED" ||
       errorData?.code ===
-        "TOKEN_INVALID";
+        "TOKEN_INVALID" ||
+      errorData?.code ===
+        "AUTH_REQUIRED";
 
-    if (shouldRefresh) {
+    /*
+     * Try refresh when:
+     *
+     * 1. token existed but became invalid/expired
+     * 2. token was missing but refresh session exists
+     */
+    if (
+      shouldRefresh &&
+      getRefreshToken()
+    ) {
       const newToken =
         await getNewAccessToken();
 
@@ -299,7 +393,8 @@ export async function apiRequest<T>(
           newToken;
 
         /*
-         * Retry exactly the same request.
+         * Retry exactly the same request
+         * with the fresh access token.
          */
         result =
           await request(
@@ -311,16 +406,17 @@ export async function apiRequest<T>(
     }
   }
 
-  if (!result.response.ok) {
+  /*
+   * Final failure handling.
+   */
+  if (
+    !result.response.ok
+  ) {
     const errorData =
       result.data as
         | ApiErrorResponse
         | null;
 
-    /*
-     * Only redirect if authentication
-     * could not be recovered.
-     */
     if (
       result.response.status ===
       401
@@ -338,6 +434,11 @@ export async function apiRequest<T>(
 
   return result.data as T;
 }
+
+
+/* ============================================================
+   HTTP HELPERS
+   ============================================================ */
 
 export function apiGet<T>(
   endpoint: string,
@@ -358,9 +459,11 @@ export function apiPost<T>(
     endpoint,
     {
       method: "POST",
-      body: JSON.stringify(
-        body,
-      ),
+
+      body:
+        JSON.stringify(
+          body,
+        ),
     },
   );
 }
@@ -373,9 +476,11 @@ export function apiPut<T>(
     endpoint,
     {
       method: "PUT",
-      body: JSON.stringify(
-        body,
-      ),
+
+      body:
+        JSON.stringify(
+          body,
+        ),
     },
   );
 }
@@ -390,6 +495,11 @@ export function apiDelete<T>(
     },
   );
 }
+
+
+/* ============================================================
+   LOGOUT
+   ============================================================ */
 
 export async function logout(): Promise<void> {
   const refreshToken =
@@ -407,17 +517,14 @@ export async function logout(): Promise<void> {
               "application/json",
           },
 
-          body: JSON.stringify({
-            refreshToken,
-          }),
+          body:
+            JSON.stringify({
+              refreshToken,
+            }),
         },
       );
     }
   } finally {
     clearAuthentication();
   }
-}
-
-export function clearAuth(): void {
-  clearAuthentication();
 }

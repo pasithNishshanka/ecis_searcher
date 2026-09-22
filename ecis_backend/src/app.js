@@ -20,6 +20,7 @@ const ecisRoutes = require("./routes/ecis.routes");
 const ecisReviewRoutes = require("./routes/ecisReview.routes");
 const ecisConfirmationRoutes = require("./routes/ecisConfirmation.routes");
 const authRoutes = require("./routes/auth.routes");
+const bhtRoutes = require("./routes/bht.routes");
 
 const errorHandler = require("./middleware/error.middleware");
 const { authenticate } = require("./middleware/auth.middleware");
@@ -106,6 +107,24 @@ app.use("/api/ecis", ecisReviewRoutes);
 
 app.use("/api/ecis", ecisConfirmationRoutes);
 
+app.use(
+  "/api/bht",
+  bhtRoutes,
+);
+
+
+app.use("/api/admissions", admissionRoutes);
+
 app.use(errorHandler);
 
+
+app.use("/api/wards", wardRoutes);
+
+app.use("/api/admissions", admissionRoutes);
+
+app.use("/api/bht", bhtRoutes);
+
+app.use("/api/clinics", clinicRoutes);
+
+app.use("/api/emergency", emergencyRoutes);
 module.exports = app;

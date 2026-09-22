@@ -1,6 +1,9 @@
-import { computed, onMounted, reactive, ref } from "vue";
-
-import { calculateAge } from "../utils/patient";
+import {
+  computed,
+  onMounted,
+  reactive,
+  ref,
+} from "vue";
 
 import {
   apiGet,
@@ -10,6 +13,7 @@ import {
 
 import type {
   Patient,
+  AdmissionRecord,
   TreatmentRecord,
   Ward,
   EmergencyCase,
@@ -20,17 +24,6 @@ import type {
    AUTHENTICATED USER HELPERS
    ============================================================ */
 
-/*
- * The authenticated hospital is taken from the user information
- * saved after login.
- *
- * IMPORTANT:
- * This value is only used by the frontend for selecting/loading
- * the current hospital's data.
- *
- * The backend remains responsible for validating the actual
- * hospital ownership using the JWT.
- */
 function getHospitalId(): number | null {
   try {
     const rawUser =
@@ -59,6 +52,7 @@ function getHospitalId(): number | null {
   }
 }
 
+
 /* ============================================================
    REACTIVE STATE
    ============================================================ */
@@ -82,7 +76,7 @@ const loadError =
   ref("");
 
 /* ============================================================
-   HELPERS
+   RESPONSE HELPERS
    ============================================================ */
 
 function responseArray(
@@ -114,6 +108,7 @@ function responseArray(
 
   return [];
 }
+
 
 /* ============================================================
    MAP PATIENT
@@ -261,6 +256,7 @@ function mapPatient(
   };
 }
 
+
 /* ============================================================
    MAP TREATMENT
    ============================================================ */
@@ -352,6 +348,121 @@ function mapTreatment(
   };
 }
 
+
+/* ============================================================
+   MAP ADMISSION
+   ============================================================ */
+
+function mapAdmission(
+  row: any,
+): AdmissionRecord {
+  return {
+    id: String(
+      row?.admission_id ??
+        row?.id ??
+        "",
+    ),
+
+    admissionNumber:
+      String(
+        row?.admission_number ??
+          "",
+      ),
+
+    admissionDate:
+      row?.admission_date ??
+      "",
+
+    dischargeDate:
+      row?.discharge_date ??
+      null,
+
+    admissionReason:
+      row?.admission_reason ??
+      null,
+
+    admissionDiagnosis:
+      row?.admission_diagnosis ??
+      null,
+
+    dischargeDiagnosis:
+      row?.discharge_diagnosis ??
+      null,
+
+    dischargeSummary:
+      row?.discharge_summary ??
+      null,
+
+    status:
+      row?.status ??
+      "",
+
+    encounterId:
+      row?.encounter_id != null
+        ? String(
+            row.encounter_id,
+          )
+        : null,
+
+    encounterType:
+      row?.encounter_type ??
+      null,
+
+    wardId:
+      row?.ward_id != null
+        ? String(
+            row.ward_id,
+          )
+        : null,
+
+    wardCode:
+      row?.ward_code ??
+      null,
+
+    wardName:
+      row?.ward_name ??
+      null,
+
+    wardType:
+      row?.ward_type ??
+      null,
+
+    bedId:
+      row?.bed_id != null
+        ? String(
+            row.bed_id,
+          )
+        : null,
+
+    bedNumber:
+      row?.bed_number ??
+      null,
+
+    doctorId:
+      row?.doctor_id != null
+        ? String(
+            row.doctor_id,
+          )
+        : null,
+
+    doctorName:
+      row?.doctor_name ??
+      null,
+
+    hospitalId:
+      row?.hospital_id != null
+        ? String(
+            row.hospital_id,
+          )
+        : null,
+
+    hospitalName:
+      row?.hospital_name ??
+      null,
+  };
+}
+
+
 /* ============================================================
    MAP EMERGENCY
    ============================================================ */
@@ -405,6 +516,7 @@ function mapEmergency(
           "IN_TREATMENT",
   };
 }
+
 
 /* ============================================================
    MAP WARD
@@ -475,24 +587,33 @@ function mapWard(
                 bed.patient_id,
               )
             : undefined,
+
+        admissionId:
+          bed?.admission_id !=
+          null
+            ? String(
+                bed.admission_id,
+              )
+            : undefined,
+
+        admissionNumber:
+          bed?.admission_number !=
+          null
+            ? String(
+                bed.admission_number,
+              )
+            : undefined,
       }),
     ),
   };
 }
+
 
 /* ============================================================
    LOAD PATIENTS
    ============================================================ */
 
 async function loadPatients() {
-  /*
-   * IMPORTANT:
-   *
-   * apiGet() now comes from services/api.ts.
-   *
-   * Therefore an expired access token is automatically refreshed
-   * before the request is finally considered failed.
-   */
   const response =
     await apiGet<any>(
       "/patients",
@@ -511,6 +632,7 @@ async function loadPatients() {
     ),
   );
 }
+
 
 /* ============================================================
    LOAD WARDS AND BEDS
@@ -579,6 +701,7 @@ async function loadWards() {
   }
 }
 
+
 /* ============================================================
    LOAD TREATMENTS
    ============================================================ */
@@ -603,16 +726,13 @@ async function loadTreatments() {
       ),
     );
   } catch (error) {
-    /*
-     * Treatment API is currently independent.
-     * Do not break patients when it fails.
-     */
     console.warn(
       "Treatment load failed:",
       error,
     );
   }
 }
+
 
 /* ============================================================
    LOAD EMERGENCIES
@@ -645,6 +765,7 @@ async function loadEmergencies() {
   }
 }
 
+
 /* ============================================================
    LOAD EVERYTHING
    ============================================================ */
@@ -657,9 +778,6 @@ async function loadBackendData() {
     "";
 
   try {
-    /*
-     * Patients are mandatory.
-     */
     await loadPatients();
   } catch (error) {
     console.error(
@@ -673,10 +791,6 @@ async function loadBackendData() {
         : "Unable to load patients.";
   }
 
-  /*
-   * Other modules cannot break
-   * the patient registry.
-   */
   await Promise.all([
     loadTreatments(),
     loadEmergencies(),
@@ -686,6 +800,7 @@ async function loadBackendData() {
   loading.value =
     false;
 }
+
 
 /* ============================================================
    STORE
@@ -712,6 +827,7 @@ export function useEHR() {
       () => db.emergencies,
     );
 
+
   /* ----------------------------------------------------------
      FIND PATIENT
      ---------------------------------------------------------- */
@@ -731,6 +847,7 @@ export function useEHR() {
           String(id),
     );
   }
+
 
   /* ----------------------------------------------------------
      PATIENT TREATMENTS
@@ -761,6 +878,7 @@ export function useEHR() {
       );
   }
 
+
   /* ----------------------------------------------------------
      REFRESH
      ---------------------------------------------------------- */
@@ -768,6 +886,7 @@ export function useEHR() {
   async function refresh() {
     await loadBackendData();
   }
+
 
   /* ----------------------------------------------------------
      CREATE PATIENT
@@ -859,16 +978,13 @@ export function useEHR() {
       );
     }
 
-    /*
-     * Do NOT manually generate P000xxx.
-     * PostgreSQL is authoritative.
-     */
     await loadPatients();
 
     return mapPatient(
       response.data,
     );
   }
+
 
   /* ----------------------------------------------------------
      UPDATE PATIENT
@@ -951,6 +1067,7 @@ export function useEHR() {
       response.data,
     );
   }
+
 
   /* ----------------------------------------------------------
      PERSIST TREATMENT RECORD
@@ -1046,6 +1163,7 @@ export function useEHR() {
     );
   }
 
+
   /* ----------------------------------------------------------
      WARD
      ---------------------------------------------------------- */
@@ -1080,13 +1198,6 @@ export function useEHR() {
       await apiPost<any>(
         "/wards",
         {
-          /*
-           * Kept for compatibility with the
-           * existing frontend.
-           *
-           * The backend does NOT trust this value.
-           * It gets hospitalId from req.user.
-           */
           hospitalId,
 
           wardCode,
@@ -1114,12 +1225,6 @@ export function useEHR() {
       );
     }
 
-    /*
-     * Create the requested beds.
-     *
-     * Each request goes through the central API
-     * service, so token refresh is also handled here.
-     */
     await Promise.all(
       Array.from(
         {
@@ -1148,6 +1253,7 @@ export function useEHR() {
     await loadWards();
   }
 
+
   /* ----------------------------------------------------------
      ASSIGN PATIENT TO BED
      ---------------------------------------------------------- */
@@ -1174,10 +1280,6 @@ export function useEHR() {
             patientId,
           ),
 
-        /*
-         * Kept for compatibility.
-         * Backend uses the JWT hospital as authoritative.
-         */
         hospitalId,
 
         wardId:
@@ -1197,6 +1299,74 @@ export function useEHR() {
 
     await loadWards();
   }
+
+
+  /* ----------------------------------------------------------
+     DISCHARGE INPATIENT
+     ---------------------------------------------------------- */
+
+  async function dischargeAdmission(
+    admissionId: string,
+    dischargeDiagnosis: string,
+    dischargeSummary: string,
+  ) {
+    const parsedAdmissionId =
+      Number(
+        admissionId,
+      );
+
+    if (
+      !Number.isInteger(
+        parsedAdmissionId,
+      ) ||
+      parsedAdmissionId <= 0
+    ) {
+      throw new Error(
+        "A valid admission is required for discharge.",
+      );
+    }
+
+    const diagnosis =
+      String(
+        dischargeDiagnosis ||
+          "",
+      ).trim();
+
+    const summary =
+      String(
+        dischargeSummary ||
+          "",
+      ).trim();
+
+    if (!diagnosis) {
+      throw new Error(
+        "Discharge diagnosis is required.",
+      );
+    }
+
+    if (!summary) {
+      throw new Error(
+        "Discharge summary is required.",
+      );
+    }
+
+    const response =
+      await apiPost<any>(
+        `/admissions/${parsedAdmissionId}/discharge`,
+        {
+          dischargeDiagnosis:
+            diagnosis,
+
+          dischargeSummary:
+            summary,
+        },
+      );
+
+    await loadWards();
+
+    return response?.data;
+  }
+
 
   /* ----------------------------------------------------------
      PERSIST EMERGENCY CASE
@@ -1261,6 +1431,7 @@ export function useEHR() {
 
     return response?.data;
   }
+
 
   /* ----------------------------------------------------------
      ECIS SEARCH
@@ -1343,6 +1514,43 @@ export function useEHR() {
     );
   }
 
+
+  /* ----------------------------------------------------------
+     PATIENT ADMISSION HISTORY
+     ---------------------------------------------------------- */
+
+  async function getPatientAdmissions(
+    patientId: string,
+  ): Promise<AdmissionRecord[]> {
+    const parsedPatientId =
+      Number(
+        patientId,
+      );
+
+    if (
+      !Number.isInteger(
+        parsedPatientId,
+      ) ||
+      parsedPatientId <= 0
+    ) {
+      throw new Error(
+        "A valid patient is required to load admission history.",
+      );
+    }
+
+    const response =
+      await apiGet<any>(
+        `/admissions/patient/${parsedPatientId}`,
+      );
+
+    return responseArray(
+      response,
+    ).map(
+      mapAdmission,
+    );
+  }
+
+
   /* ----------------------------------------------------------
      INITIAL LOAD
      ---------------------------------------------------------- */
@@ -1366,6 +1574,8 @@ export function useEHR() {
 
     patientById,
 
+    getPatientAdmissions,
+
     treatmentsForPatient,
 
     addPatient,
@@ -1377,6 +1587,8 @@ export function useEHR() {
     addWard,
 
     assignBed,
+
+    dischargeAdmission,
 
     addEmergency,
 

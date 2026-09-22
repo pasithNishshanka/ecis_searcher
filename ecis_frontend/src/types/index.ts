@@ -56,6 +56,51 @@ export type TreatmentType =
   | "EMERGENCY";
 
 
+export interface AdmissionRecord {
+  id: string;
+
+  admissionNumber: string;
+
+  admissionDate: string;
+
+  dischargeDate?: string | null;
+
+  admissionReason?: string | null;
+
+  admissionDiagnosis?: string | null;
+
+  dischargeDiagnosis?: string | null;
+
+  dischargeSummary?: string | null;
+
+  status: "ADMITTED" | "DISCHARGED" | string;
+
+  encounterId?: string | null;
+
+  encounterType?: string | null;
+
+  wardId?: string | null;
+
+  wardCode?: string | null;
+
+  wardName?: string | null;
+
+  wardType?: string | null;
+
+  bedId?: string | null;
+
+  bedNumber?: string | null;
+
+  doctorId?: string | null;
+
+  doctorName?: string | null;
+
+  hospitalId?: string | null;
+
+  hospitalName?: string | null;
+}
+
+
 export interface TreatmentRecord {
   id: string;
 
@@ -106,6 +151,10 @@ export interface Bed {
     | "MAINTENANCE";
 
   patientId?: string;
+
+  admissionId?: string;
+
+  admissionNumber?: string;
 }
 
 
