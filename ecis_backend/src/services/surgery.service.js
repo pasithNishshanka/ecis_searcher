@@ -1,61 +1,433 @@
 const pool = require("../config/database");
 
-async function createSurgery(surgeryData) {
-  const {
+function nullablePositiveInteger(value, fieldName) {
+  if (
+    value === undefined ||
+    value === null ||
+    value === ""
+  ) {
+    return null;
+  }
+
+  const parsed = Number(value);
+
+  if (
+    !Number.isSafeInteger(parsed) ||
+    parsed <= 0
+  ) {
+    throw new Error(
+      `${fieldName} must be a positive integer`,
+    );
+  }
+
+  return parsed;
+}
+
+function requiredText(value, fieldName) {
+  const text =
+    String(value ?? "").trim();
+
+  if (!text) {
+    throw new Error(
+      `${fieldName} is required`,
+    );
+  }
+
+  return text;
+}
+
+function nullableText(value) {
+  if (
+    value === undefined ||
+    value === null
+  ) {
+    return null;
+  }
+
+  const text =
+    String(value).trim();
+
+  return text || null;
+}
+
+function parseClinicalDate(
+  value,
+  fieldName,
+) {
+  if (
+    value === undefined ||
+    value === null ||
+    value === ""
+  ) {
+    return null;
+  }
+
+  const parsed =
+    new Date(value);
+
+  if (
+    Number.isNaN(
+      parsed.getTime(),
+    )
+  ) {
+    throw new Error(
+      `${fieldName} is invalid`,
+    );
+  }
+
+  if (
+    parsed.getTime() >
+    Date.now()
+  ) {
+    throw new Error(
+      `${fieldName} cannot be in the future`,
+    );
+  }
+
+  return value;
+}
+
+async function validateClinicalContext(
+  client,
+  {
     patientId,
     hospitalId,
     encounterId,
     admissionId,
-    surgeryCode,
-    surgeryName,
-    surgeryDate,
-    bodySite,
-    laterality,
-    surgeonUserId,
-    preoperativeDiagnosis,
-    postoperativeDiagnosis,
-    findings,
-    complications,
-    surgicalNotes,
-  } = surgeryData;
-
-  const client = await pool.connect();
-
-  try {
-    await client.query("BEGIN");
-
-    /*
-     * Confirm that the selected patient exists.
-     */
-    const patientResult = await client.query(
+    requireEncounter = true,
+  },
+) {
+  const patientResult =
+    await client.query(
       `
-          SELECT
-            patient_id,
-            hospital_id
-          FROM patients
-          WHERE patient_id = $1
-          LIMIT 1;
-        `,
-      [patientId],
+        SELECT
+          patient_id,
+          hospital_id,
+          status
+        FROM public.patients
+        WHERE
+          patient_id = $1
+          AND hospital_id = $2
+        FOR SHARE;
+      `,
+      [
+        patientId,
+        hospitalId,
+      ],
     );
 
-    if (!patientResult.rows[0]) {
-      throw new Error("Patient not found");
+  if (
+    patientResult.rowCount === 0
+  ) {
+    throw new Error(
+      "Active patient not found for the authenticated hospital",
+    );
+  }
+
+  const patient =
+    patientResult.rows[0];
+
+  if (
+    patient.status !==
+    "ACTIVE"
+  ) {
+    throw new Error(
+      "The selected patient is not active",
+    );
+  }
+
+  if (
+    requireEncounter &&
+    !encounterId
+  ) {
+    throw new Error(
+      "encounterId is required for a surgery record",
+    );
+  }
+
+  let encounter =
+    null;
+
+  let admission =
+    null;
+
+  if (encounterId) {
+    const encounterResult =
+      await client.query(
+        `
+          SELECT
+            e.encounter_id,
+            e.patient_id,
+            e.hospital_id,
+            e.encounter_type,
+            e.encounter_date,
+            e.department,
+            e.status,
+            e.chief_complaint,
+            e.notes
+          FROM public.encounters e
+          WHERE
+            e.encounter_id = $1
+            AND e.patient_id = $2
+            AND e.hospital_id = $3
+          FOR SHARE;
+        `,
+        [
+          encounterId,
+          patientId,
+          hospitalId,
+        ],
+      );
+
+    if (
+      encounterResult.rowCount ===
+      0
+    ) {
+      throw new Error(
+        "Selected encounter does not belong to the selected patient",
+      );
     }
 
-    const patientHospitalId = patientResult.rows[0].hospital_id;
+    encounter =
+      encounterResult.rows[0];
+  }
 
-    /*
-     * Ensure the selected patient
-     * belongs to the logged-in hospital.
-     */
-    if (hospitalId && Number(patientHospitalId) !== Number(hospitalId)) {
-      throw new Error("Patient does not belong to the authenticated hospital");
+  if (admissionId) {
+    const admissionResult =
+      await client.query(
+        `
+          SELECT
+            a.admission_id,
+            a.patient_id,
+            a.encounter_id,
+            a.admission_number,
+            a.admission_date,
+            a.status,
+            a.ward_id,
+            w.ward_name
+          FROM public.admissions a
+          INNER JOIN public.wards w
+            ON w.ward_id = a.ward_id
+          WHERE
+            a.admission_id = $1
+            AND a.patient_id = $2
+            AND w.hospital_id = $3
+          FOR SHARE;
+        `,
+        [
+          admissionId,
+          patientId,
+          hospitalId,
+        ],
+      );
+
+    if (
+      admissionResult.rowCount ===
+      0
+    ) {
+      throw new Error(
+        "Selected admission does not belong to the selected patient",
+      );
     }
 
-    const result = await client.query(
+    admission =
+      admissionResult.rows[0];
+
+    if (
+      encounter &&
+      admission.encounter_id !==
+        encounter.encounter_id
+    ) {
+      throw new Error(
+        "Selected admission is not linked to the selected encounter",
+      );
+    }
+  } else if (encounterId) {
+    const admissionResult =
+      await client.query(
+        `
+          SELECT
+            a.admission_id,
+            a.patient_id,
+            a.encounter_id,
+            a.admission_number,
+            a.admission_date,
+            a.status,
+            a.ward_id,
+            w.ward_name
+          FROM public.admissions a
+          INNER JOIN public.wards w
+            ON w.ward_id = a.ward_id
+          WHERE
+            a.encounter_id = $1
+            AND a.patient_id = $2
+            AND w.hospital_id = $3
+          ORDER BY
+            a.admission_id DESC
+          LIMIT 1;
+        `,
+        [
+          encounterId,
+          patientId,
+          hospitalId,
+        ],
+      );
+
+    admission =
+      admissionResult.rows[0] ||
+      null;
+  }
+
+  return {
+    patient,
+    encounter,
+    admission,
+  };
+}
+
+async function validateRecordingUser(
+  client,
+  {
+    userId,
+    hospitalId,
+  },
+) {
+  const result =
+    await client.query(
       `
-          INSERT INTO surgeries (
+        SELECT
+          user_id,
+          hospital_id,
+          full_name,
+          role,
+          is_active
+        FROM public.hospital_users
+        WHERE
+          user_id = $1
+          AND hospital_id = $2
+        LIMIT 1;
+      `,
+      [
+        userId,
+        hospitalId,
+      ],
+    );
+
+  if (
+    result.rowCount === 0 ||
+    !result.rows[0].is_active
+  ) {
+    throw new Error(
+      "Authenticated clinical user was not found",
+    );
+  }
+
+  const user =
+    result.rows[0];
+
+  if (
+    String(
+      user.role || "",
+    )
+      .trim()
+      .toUpperCase() !==
+    "DOCTOR"
+  ) {
+    throw new Error(
+      "Only an authenticated doctor can record surgery",
+    );
+  }
+
+  return user;
+}
+
+async function createSurgery(
+  surgeryData,
+) {
+  const patientId =
+    nullablePositiveInteger(
+      surgeryData.patientId,
+      "patientId",
+    );
+
+  const hospitalId =
+    nullablePositiveInteger(
+      surgeryData.hospitalId,
+      "hospitalId",
+    );
+
+  const encounterId =
+    nullablePositiveInteger(
+      surgeryData.encounterId,
+      "encounterId",
+    );
+
+  const admissionId =
+    nullablePositiveInteger(
+      surgeryData.admissionId,
+      "admissionId",
+    );
+
+  const userId =
+    nullablePositiveInteger(
+      surgeryData.surgeonUserId,
+      "surgeonUserId",
+    );
+
+  const surgeryName =
+    requiredText(
+      surgeryData.surgeryName,
+      "surgeryName",
+    );
+
+  const surgeryDate =
+    parseClinicalDate(
+      surgeryData.surgeryDate,
+      "surgeryDate",
+    );
+
+  if (
+    !patientId ||
+    !hospitalId ||
+    !userId
+  ) {
+    throw new Error(
+      "Authenticated surgery context is incomplete",
+    );
+  }
+
+  const client =
+    await pool.connect();
+
+  try {
+    await client.query(
+      "BEGIN",
+    );
+
+    await validateRecordingUser(
+      client,
+      {
+        userId,
+        hospitalId,
+      },
+    );
+
+    const context =
+      await validateClinicalContext(
+        client,
+        {
+          patientId,
+          hospitalId,
+          encounterId,
+          admissionId,
+          requireEncounter: true,
+        },
+      );
+
+    const result =
+      await client.query(
+        `
+          INSERT INTO public.surgeries (
             patient_id,
             encounter_id,
             admission_id,
@@ -92,29 +464,58 @@ async function createSurgery(surgeryData) {
           )
           RETURNING *;
         `,
-      [
-        patientId,
-        encounterId || null,
-        admissionId || null,
-        surgeryCode || null,
-        surgeryName,
-        surgeryDate || null,
-        bodySite || null,
-        laterality || null,
-        surgeonUserId || null,
-        preoperativeDiagnosis || null,
-        postoperativeDiagnosis || null,
-        findings || null,
-        complications || null,
-        surgicalNotes || null,
-      ],
+        [
+          patientId,
+          encounterId,
+          context.admission
+            ?.admission_id ??
+            admissionId,
+          nullableText(
+            surgeryData.surgeryCode,
+          ),
+          surgeryName,
+          surgeryDate,
+          nullableText(
+            surgeryData.bodySite,
+          ),
+          nullableText(
+            surgeryData.laterality,
+          ),
+          userId,
+          nullableText(
+            surgeryData.preoperativeDiagnosis,
+          ),
+          nullableText(
+            surgeryData.postoperativeDiagnosis,
+          ),
+          nullableText(
+            surgeryData.findings,
+          ),
+          nullableText(
+            surgeryData.complications,
+          ),
+          nullableText(
+            surgeryData.surgicalNotes,
+          ),
+        ],
+      );
+
+    await client.query(
+      "COMMIT",
     );
 
-    await client.query("COMMIT");
-
-    return result.rows[0];
+    return {
+      surgery:
+        result.rows[0],
+      encounter:
+        context.encounter,
+      admission:
+        context.admission,
+    };
   } catch (error) {
-    await client.query("ROLLBACK");
+    await client.query(
+      "ROLLBACK",
+    );
 
     throw error;
   } finally {
@@ -122,74 +523,256 @@ async function createSurgery(surgeryData) {
   }
 }
 
-async function getPatientSurgeries(patientId) {
-  const query = `
-    SELECT
-      s.surgery_id,
-      s.surgery_code,
-      s.surgery_name,
-      s.surgery_date,
-      s.body_site,
-      s.laterality,
-      s.preoperative_diagnosis,
-      s.postoperative_diagnosis,
-      s.findings,
-      s.complications,
-      s.surgical_notes,
-      s.encounter_id,
-      s.admission_id,
+async function getPatientClinicalContext(
+  patientIdValue,
+  hospitalIdValue,
+) {
+  const patientId =
+    nullablePositiveInteger(
+      patientIdValue,
+      "patientId",
+    );
 
-      u.user_id AS surgeon_id,
-      u.full_name AS surgeon_name
+  const hospitalId =
+    nullablePositiveInteger(
+      hospitalIdValue,
+      "hospitalId",
+    );
 
-    FROM surgeries s
+  if (
+    !patientId ||
+    !hospitalId
+  ) {
+    throw new Error(
+      "Patient context is incomplete",
+    );
+  }
 
-    LEFT JOIN hospital_users u
-      ON s.surgeon_user_id =
-         u.user_id
+  const patientResult =
+    await pool.query(
+      `
+        SELECT
+          patient_id,
+          patient_number,
+          first_name,
+          middle_name,
+          last_name,
+          date_of_birth,
+          gender,
+          hospital_id,
+          status
+        FROM public.patients
+        WHERE
+          patient_id = $1
+          AND hospital_id = $2
+        LIMIT 1;
+      `,
+      [
+        patientId,
+        hospitalId,
+      ],
+    );
 
-    WHERE s.patient_id = $1
+  if (
+    patientResult.rowCount ===
+    0
+  ) {
+    throw new Error(
+      "Patient not found for the authenticated hospital",
+    );
+  }
 
-    ORDER BY
-      s.surgery_date DESC;
-  `;
+  const encountersResult =
+    await pool.query(
+      `
+        SELECT
+          e.encounter_id,
+          e.encounter_type,
+          e.encounter_date,
+          e.department,
+          e.status,
+          e.chief_complaint,
+          e.notes,
+          a.admission_id,
+          a.admission_number,
+          a.admission_date,
+          a.status AS admission_status,
+          w.ward_name
+        FROM public.encounters e
+        LEFT JOIN public.admissions a
+          ON a.encounter_id = e.encounter_id
+         AND a.patient_id = e.patient_id
+        LEFT JOIN public.wards w
+          ON w.ward_id = a.ward_id
+        WHERE
+          e.patient_id = $1
+          AND e.hospital_id = $2
+        ORDER BY
+          e.encounter_date DESC,
+          e.encounter_id DESC;
+      `,
+      [
+        patientId,
+        hospitalId,
+      ],
+    );
 
-  const result = await pool.query(query, [patientId]);
+  return {
+    patient:
+      patientResult.rows[0],
+    encounters:
+      encountersResult.rows,
+  };
+}
+
+async function getPatientSurgeries(
+  patientIdValue,
+  hospitalIdValue,
+) {
+  const patientId =
+    nullablePositiveInteger(
+      patientIdValue,
+      "patientId",
+    );
+
+  const hospitalId =
+    nullablePositiveInteger(
+      hospitalIdValue,
+      "hospitalId",
+    );
+
+  if (
+    !patientId ||
+    !hospitalId
+  ) {
+    throw new Error(
+      "Patient context is incomplete",
+    );
+  }
+
+  const result =
+    await pool.query(
+      `
+        SELECT
+          s.surgery_id,
+          s.surgery_code,
+          s.surgery_name,
+          s.surgery_date,
+          s.body_site,
+          s.laterality,
+          s.preoperative_diagnosis,
+          s.postoperative_diagnosis,
+          s.findings,
+          s.complications,
+          s.surgical_notes,
+          s.encounter_id,
+          s.admission_id,
+          e.encounter_type,
+          e.department,
+          e.status AS encounter_status,
+          a.admission_number,
+          a.status AS admission_status,
+          w.ward_name,
+          u.user_id AS surgeon_id,
+          u.full_name AS surgeon_name
+        FROM public.surgeries s
+        INNER JOIN public.patients p
+          ON p.patient_id = s.patient_id
+         AND p.hospital_id = $2
+        LEFT JOIN public.encounters e
+          ON e.encounter_id = s.encounter_id
+         AND e.patient_id = s.patient_id
+        LEFT JOIN public.admissions a
+          ON a.admission_id = s.admission_id
+         AND a.patient_id = s.patient_id
+        LEFT JOIN public.wards w
+          ON w.ward_id = a.ward_id
+        LEFT JOIN public.hospital_users u
+          ON u.user_id = s.surgeon_user_id
+        WHERE
+          s.patient_id = $1
+        ORDER BY
+          s.surgery_date DESC,
+          s.surgery_id DESC;
+      `,
+      [
+        patientId,
+        hospitalId,
+      ],
+    );
 
   return result.rows;
 }
 
-async function getSurgeryById(surgeryId) {
-  const query = `
-    SELECT
-      s.*,
+async function getSurgeryById(
+  surgeryIdValue,
+  hospitalIdValue,
+) {
+  const surgeryId =
+    nullablePositiveInteger(
+      surgeryIdValue,
+      "surgeryId",
+    );
 
-      p.patient_number,
-      p.first_name,
-      p.last_name,
+  const hospitalId =
+    nullablePositiveInteger(
+      hospitalIdValue,
+      "hospitalId",
+    );
 
-      u.full_name AS surgeon_name
+  if (
+    !surgeryId ||
+    !hospitalId
+  ) {
+    throw new Error(
+      "Surgery context is incomplete",
+    );
+  }
 
-    FROM surgeries s
+  const result =
+    await pool.query(
+      `
+        SELECT
+          s.*,
+          p.patient_number,
+          p.first_name,
+          p.middle_name,
+          p.last_name,
+          e.encounter_type,
+          e.encounter_date,
+          e.department,
+          a.admission_number,
+          a.status AS admission_status,
+          w.ward_name,
+          u.full_name AS surgeon_name
+        FROM public.surgeries s
+        INNER JOIN public.patients p
+          ON p.patient_id = s.patient_id
+         AND p.hospital_id = $2
+        LEFT JOIN public.encounters e
+          ON e.encounter_id = s.encounter_id
+        LEFT JOIN public.admissions a
+          ON a.admission_id = s.admission_id
+        LEFT JOIN public.wards w
+          ON w.ward_id = a.ward_id
+        LEFT JOIN public.hospital_users u
+          ON u.user_id = s.surgeon_user_id
+        WHERE
+          s.surgery_id = $1;
+      `,
+      [
+        surgeryId,
+        hospitalId,
+      ],
+    );
 
-    INNER JOIN patients p
-      ON s.patient_id =
-         p.patient_id
-
-    LEFT JOIN hospital_users u
-      ON s.surgeon_user_id =
-         u.user_id
-
-    WHERE s.surgery_id = $1;
-  `;
-
-  const result = await pool.query(query, [surgeryId]);
-
-  return result.rows[0] || null;
+  return result.rows[0] ||
+    null;
 }
 
 module.exports = {
   createSurgery,
+  getPatientClinicalContext,
   getPatientSurgeries,
   getSurgeryById,
 };

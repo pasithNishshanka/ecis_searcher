@@ -5,6 +5,11 @@ const API_BASE_URL = (
 
 const REQUEST_TIMEOUT_MS = 30000;
 
+
+/* ============================================================
+   TYPES
+   ============================================================ */
+
 interface ApiErrorResponse {
   success?: boolean;
   message?: string;
@@ -20,12 +25,11 @@ interface RefreshResponse {
   };
 }
 
-/*
- * Only ONE refresh request can run at a time.
- *
- * If several API requests need a refresh at the same time,
- * they all wait for this same promise.
- */
+
+/* ============================================================
+   AUTH STATE
+   ============================================================ */
+
 let refreshPromise:
   | Promise<string | null>
   | null = null;
@@ -34,42 +38,22 @@ let redirectingToLogin = false;
 
 
 /* ============================================================
-   AUTH STORAGE
+   TOKEN HELPERS
    ============================================================ */
 
-function getAccessToken():
-  string | null {
-  const token =
-    localStorage.getItem(
-      "ecis-token",
-    );
-
-  if (
-    !token ||
-    !token.trim()
-  ) {
-    return null;
-  }
-
-  return token.trim();
+function getAccessToken(): string | null {
+  return localStorage.getItem(
+    "ecis-token",
+  );
 }
 
-function getRefreshToken():
-  string | null {
-  const token =
-    localStorage.getItem(
-      "ecis-refresh-token",
-    );
 
-  if (
-    !token ||
-    !token.trim()
-  ) {
-    return null;
-  }
-
-  return token.trim();
+function getRefreshToken(): string | null {
+  return localStorage.getItem(
+    "ecis-refresh-token",
+  );
 }
+
 
 function saveAccessToken(
   token: string,
@@ -87,6 +71,7 @@ function saveAccessToken(
     );
   }
 }
+
 
 function clearAuthentication(): void {
   localStorage.removeItem(
@@ -110,8 +95,7 @@ function clearAuthentication(): void {
 function redirectToLogin(): void {
   if (
     redirectingToLogin ||
-    window.location.pathname ===
-      "/login"
+    window.location.pathname === "/login"
   ) {
     return;
   }
@@ -133,8 +117,9 @@ function redirectToLogin(): void {
    REFRESH ACCESS TOKEN
    ============================================================ */
 
-async function refreshAccessToken():
-  Promise<string | null> {
+export async function refreshAccessToken(): Promise<
+  string | null
+> {
   const refreshToken =
     getRefreshToken();
 
@@ -180,39 +165,31 @@ async function refreshAccessToken():
     const newToken =
       data?.data?.token;
 
-    if (
-      !newToken ||
-      !newToken.trim()
-    ) {
+    if (!newToken) {
       clearAuthentication();
 
       return null;
     }
 
     saveAccessToken(
-      newToken.trim(),
+      newToken,
       data?.data?.user,
     );
 
-    return newToken.trim();
+    return newToken;
   } catch {
-    /*
-     * Network failure while refreshing should not
-     * immediately destroy the existing refresh token.
-     *
-     * This allows a later request to retry refresh.
-     */
     return null;
   }
 }
 
 
 /* ============================================================
-   SINGLE REFRESH QUEUE
+   SINGLE REFRESH REQUEST
    ============================================================ */
 
-async function getNewAccessToken():
-  Promise<string | null> {
+async function getNewAccessToken(): Promise<
+  string | null
+> {
   if (!refreshPromise) {
     refreshPromise =
       refreshAccessToken();
@@ -229,7 +206,33 @@ async function getNewAccessToken():
 
 
 /* ============================================================
-   RAW REQUEST
+   RESTORE SESSION
+   ============================================================ */
+
+export async function restoreSession(): Promise<boolean> {
+  const accessToken =
+    getAccessToken();
+
+  if (accessToken) {
+    return true;
+  }
+
+  const refreshToken =
+    getRefreshToken();
+
+  if (!refreshToken) {
+    return false;
+  }
+
+  const token =
+    await getNewAccessToken();
+
+  return Boolean(token);
+}
+
+
+/* ============================================================
+   GENERIC REQUEST
    ============================================================ */
 
 async function request(
@@ -245,8 +248,9 @@ async function request(
 
   const timeout =
     window.setTimeout(
-      () =>
-        controller.abort(),
+      () => {
+        controller.abort();
+      },
       REQUEST_TIMEOUT_MS,
     );
 
@@ -316,36 +320,9 @@ export async function apiRequest<T>(
   endpoint: string,
   options: RequestInit = {},
 ): Promise<T> {
-  /*
-   * Get the existing short-lived access token.
-   */
   let token =
     getAccessToken();
 
-  /*
-   * IMPORTANT FIX:
-   *
-   * If the access token is missing but a refresh token
-   * still exists, refresh BEFORE sending the protected
-   * request.
-   *
-   * This prevents:
-   *
-   *     AUTH_REQUIRED
-   *
-   * when the browser still has a valid refresh session.
-   */
-  if (
-    !token &&
-    getRefreshToken()
-  ) {
-    token =
-      await getNewAccessToken();
-  }
-
-  /*
-   * First request.
-   */
   let result =
     await request(
       endpoint,
@@ -353,14 +330,9 @@ export async function apiRequest<T>(
       token,
     );
 
-  /*
-   * Access token expired or invalid.
-   *
-   * Try refresh BEFORE logging the user out.
-   */
   if (
-    result.response.status ===
-      401
+    result.response.status === 401 &&
+    token
   ) {
     const errorData =
       result.data as
@@ -368,23 +340,13 @@ export async function apiRequest<T>(
         | null;
 
     const shouldRefresh =
-      errorData?.code ===
+      !errorData?.code ||
+      errorData.code ===
         "TOKEN_EXPIRED" ||
-      errorData?.code ===
-        "TOKEN_INVALID" ||
-      errorData?.code ===
-        "AUTH_REQUIRED";
+      errorData.code ===
+        "TOKEN_INVALID";
 
-    /*
-     * Try refresh when:
-     *
-     * 1. token existed but became invalid/expired
-     * 2. token was missing but refresh session exists
-     */
-    if (
-      shouldRefresh &&
-      getRefreshToken()
-    ) {
+    if (shouldRefresh) {
       const newToken =
         await getNewAccessToken();
 
@@ -392,10 +354,6 @@ export async function apiRequest<T>(
         token =
           newToken;
 
-        /*
-         * Retry exactly the same request
-         * with the fresh access token.
-         */
         result =
           await request(
             endpoint,
@@ -406,20 +364,14 @@ export async function apiRequest<T>(
     }
   }
 
-  /*
-   * Final failure handling.
-   */
-  if (
-    !result.response.ok
-  ) {
+  if (!result.response.ok) {
     const errorData =
       result.data as
         | ApiErrorResponse
         | null;
 
     if (
-      result.response.status ===
-      401
+      result.response.status === 401
     ) {
       clearAuthentication();
 
@@ -437,7 +389,7 @@ export async function apiRequest<T>(
 
 
 /* ============================================================
-   HTTP HELPERS
+   GET
    ============================================================ */
 
 export function apiGet<T>(
@@ -451,6 +403,11 @@ export function apiGet<T>(
   );
 }
 
+
+/* ============================================================
+   POST
+   ============================================================ */
+
 export function apiPost<T>(
   endpoint: string,
   body: unknown,
@@ -459,14 +416,17 @@ export function apiPost<T>(
     endpoint,
     {
       method: "POST",
-
-      body:
-        JSON.stringify(
-          body,
-        ),
+      body: JSON.stringify(
+        body,
+      ),
     },
   );
 }
+
+
+/* ============================================================
+   PUT
+   ============================================================ */
 
 export function apiPut<T>(
   endpoint: string,
@@ -476,14 +436,17 @@ export function apiPut<T>(
     endpoint,
     {
       method: "PUT",
-
-      body:
-        JSON.stringify(
-          body,
-        ),
+      body: JSON.stringify(
+        body,
+      ),
     },
   );
 }
+
+
+/* ============================================================
+   DELETE
+   ============================================================ */
 
 export function apiDelete<T>(
   endpoint: string,
@@ -517,14 +480,27 @@ export async function logout(): Promise<void> {
               "application/json",
           },
 
-          body:
-            JSON.stringify({
-              refreshToken,
-            }),
+          body: JSON.stringify({
+            refreshToken,
+          }),
         },
       );
     }
+  } catch {
+    /*
+     * Ignore backend logout errors.
+     * Local authentication is still cleared.
+     */
   } finally {
     clearAuthentication();
   }
+}
+
+
+/* ============================================================
+   CLEAR AUTH
+   ============================================================ */
+
+export function clearAuth(): void {
+  clearAuthentication();
 }

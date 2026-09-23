@@ -1,61 +1,175 @@
-const pool = require("../config/database");
+const pool =
+  require("../config/database");
+
+
+const DEFAULT_LIMIT = 50;
+
 
 /*
- * ECIS Candidate Matching Service
+ * ------------------------------------------------------------
+ * NORMALIZATION HELPERS
+ * ------------------------------------------------------------
+ */
+
+function normalizeText(
+  value,
+) {
+  return String(
+    value ?? "",
+  )
+    .trim()
+    .toLowerCase();
+}
+
+
+function nullableText(
+  value,
+) {
+  const normalized =
+    normalizeText(
+      value,
+    );
+
+  return normalized ||
+    null;
+}
+
+
+function toNumberOrNull(
+  value,
+) {
+  if (
+    value === undefined ||
+    value === null ||
+    value === ""
+  ) {
+    return null;
+  }
+
+  const number =
+    Number(value);
+
+  return Number.isFinite(
+    number,
+  )
+    ? number
+    : null;
+}
+
+
+function positiveInteger(
+  value,
+  fieldName,
+) {
+  const number =
+    Number(value);
+
+  if (
+    !Number.isInteger(
+      number,
+    ) ||
+    number <= 0
+  ) {
+    throw new Error(
+      `${fieldName} must be a positive integer`,
+    );
+  }
+
+  return number;
+}
+
+
+/*
+ * ------------------------------------------------------------
+ * SCORE WEIGHTS
  *
- * ECIS searches the existing longitudinal EHR.
- *
- * Security rule:
- * Candidate patients are restricted to the hospital
- * associated with the authenticated emergency case.
- *
- * The score is an explainable heuristic for research.
- * It is NOT a medically validated probability of identity.
+ * These are explainable heuristic evidence weights.
+ * They are NOT medically validated probabilities.
+ * ------------------------------------------------------------
  */
 
 const WEIGHTS = {
   gender: 7,
+
   bloodGroup: 12,
+
   age: 10,
+
   height: 10,
+
   weight: 6,
+
   name: 12,
+
   phone: 10,
+
   occupation: 8,
+
   surgery: 18,
+
   fracture: 15,
+
   device: 18,
+
   dental: 12,
+
   observation: 15,
+
   treatment: 15,
+
   investigation: 12,
 };
 
-const normalize = (value) => {
-  if (value === null || value === undefined) {
-    return "";
-  }
 
-  return String(value).trim().toLowerCase();
-};
+/*
+ * ------------------------------------------------------------
+ * MAXIMUM SCORE
+ * ------------------------------------------------------------
+ */
 
-const containsValue = (value, searchValue) => {
-  if (!value || !searchValue) {
-    return false;
-  }
-
-  return normalize(value).includes(
-    normalize(searchValue),
+const MAX_SCORE =
+  Object.values(
+    WEIGHTS,
+  ).reduce(
+    (
+      total,
+      value,
+    ) =>
+      total + value,
+    0,
   );
-};
 
-const calculateAge = (dateOfBirth) => {
-  if (!dateOfBirth) {
+
+/*
+ * ------------------------------------------------------------
+ * DATE / AGE
+ * ------------------------------------------------------------
+ */
+
+function calculateAge(
+  dateOfBirth,
+) {
+  if (
+    !dateOfBirth
+  ) {
     return null;
   }
 
-  const today = new Date();
-  const dob = new Date(dateOfBirth);
+  const dob =
+    new Date(
+      dateOfBirth,
+    );
+
+  if (
+    Number.isNaN(
+      dob.getTime(),
+    )
+  ) {
+    return null;
+  }
+
+  const today =
+    new Date();
 
   let age =
     today.getFullYear() -
@@ -68,821 +182,1827 @@ const calculateAge = (dateOfBirth) => {
   if (
     monthDifference < 0 ||
     (
-      monthDifference === 0 &&
-      today.getDate() < dob.getDate()
+      monthDifference ===
+        0 &&
+      today.getDate() <
+        dob.getDate()
     )
   ) {
-    age--;
+    age -= 1;
   }
 
   return age;
-};
+}
 
-const isNumberProvided = (value) =>
-  value !== undefined &&
-  value !== null &&
-  value !== "";
 
-const addEvidence = (
-  evidence,
-  type,
-  description,
-  sourceTable,
-) => {
-  evidence.push({
-    type,
-    description,
-    sourceTable,
-  });
-};
+/*
+ * ------------------------------------------------------------
+ * INPUT VALIDATION
+ * ------------------------------------------------------------
+ */
 
-const searchCandidates = async (
-  criteria = {},
-  hospitalId,
-) => {
-  if (!hospitalId) {
+function normalizeSearchInput(
+  input,
+) {
+  const ageMin =
+    toNumberOrNull(
+      input.ageMin,
+    );
+
+  const ageMax =
+    toNumberOrNull(
+      input.ageMax,
+    );
+
+  const heightMin =
+    toNumberOrNull(
+      input.heightMin,
+    );
+
+  const heightMax =
+    toNumberOrNull(
+      input.heightMax,
+    );
+
+  const weightMin =
+    toNumberOrNull(
+      input.weightMin,
+    );
+
+  const weightMax =
+    toNumberOrNull(
+      input.weightMax,
+    );
+
+
+  if (
+    ageMin !== null &&
+    ageMax !== null &&
+    ageMin > ageMax
+  ) {
     throw new Error(
-      "Hospital context is required for ECIS search",
+      "ageMin cannot be greater than ageMax",
     );
   }
 
+
+  if (
+    heightMin !== null &&
+    heightMax !== null &&
+    heightMin > heightMax
+  ) {
+    throw new Error(
+      "heightMin cannot be greater than heightMax",
+    );
+  }
+
+
+  if (
+    weightMin !== null &&
+    weightMax !== null &&
+    weightMin > weightMax
+  ) {
+    throw new Error(
+      "weightMin cannot be greater than weightMax",
+    );
+  }
+
+
+  return {
+    patientNumber:
+      nullableText(
+        input.patientNumber,
+      ),
+
+    name:
+      nullableText(
+        input.name,
+      ),
+
+    nic:
+      nullableText(
+        input.nic,
+      ),
+
+    phone:
+      nullableText(
+        input.phone,
+      ),
+
+    gender:
+      nullableText(
+        input.gender,
+      ),
+
+    bloodGroup:
+      nullableText(
+        input.bloodGroup,
+      ),
+
+    occupation:
+      nullableText(
+        input.occupation,
+      ),
+
+    district:
+      nullableText(
+        input.district,
+      ),
+
+    province:
+      nullableText(
+        input.province,
+      ),
+
+    surgery:
+      nullableText(
+        input.surgery,
+      ),
+
+    fracture:
+      nullableText(
+        input.fracture,
+      ),
+
+    device:
+      nullableText(
+        input.device,
+      ),
+
+    dental:
+      nullableText(
+        input.dental,
+      ),
+
+    observation:
+      nullableText(
+        input.observation,
+      ),
+
+    treatment:
+      nullableText(
+        input.treatment,
+      ),
+
+    investigation:
+      nullableText(
+        input.investigation,
+      ),
+
+    ageMin,
+
+    ageMax,
+
+    heightMin,
+
+    heightMax,
+
+    weightMin,
+
+    weightMax,
+  };
+}
+
+
+/*
+ * ------------------------------------------------------------
+ * SEARCH
+ * ------------------------------------------------------------
+ */
+
+async function searchPatients(
+  searchInput,
+  hospitalIdValue,
+) {
+  const hospitalId =
+    positiveInteger(
+      hospitalIdValue,
+      "hospitalId",
+    );
+
+  const input =
+    normalizeSearchInput(
+      searchInput || {},
+    );
+
+
   /*
-   * ---------------------------------------------------------
-   * 1. RETRIEVE PATIENTS ONLY FROM USER'S HOSPITAL
-   * ---------------------------------------------------------
+   * ----------------------------------------------------------
+   * Dynamic filter parameters
+   * ----------------------------------------------------------
    */
 
-  const patientQuery = `
+  const values = [
+    hospitalId,
+  ];
+
+  const where = [
+    `
+      p.hospital_id = $1
+    `,
+
+    `
+      p.status = 'ACTIVE'
+    `,
+
+    /*
+     * ECIS population = adults.
+     */
+    `
+      p.date_of_birth <=
+      CURRENT_DATE - INTERVAL '18 years'
+    `,
+  ];
+
+
+  function addFilter(
+    sql,
+    value,
+  ) {
+    values.push(
+      value,
+    );
+
+    where.push(
+      sql.replace(
+        /\$VALUE/g,
+        `$${values.length}`,
+      ),
+    );
+  }
+
+
+  if (
+    input.patientNumber
+  ) {
+    addFilter(
+      `
+        LOWER(
+          p.patient_number
+        ) LIKE
+        '%' ||
+        LOWER($VALUE) ||
+        '%'
+      `,
+      input.patientNumber,
+    );
+  }
+
+
+  if (
+    input.name
+  ) {
+    addFilter(
+      `
+        (
+          LOWER(
+            CONCAT_WS(
+              ' ',
+              p.first_name,
+              p.middle_name,
+              p.last_name
+            )
+          ) LIKE
+          '%' ||
+          LOWER($VALUE) ||
+          '%'
+        )
+      `,
+      input.name,
+    );
+  }
+
+
+  if (
+    input.nic
+  ) {
+    addFilter(
+      `
+        LOWER(
+          COALESCE(
+            p.nic_number,
+            ''
+          )
+        ) LIKE
+        '%' ||
+        LOWER($VALUE) ||
+        '%'
+      `,
+      input.nic,
+    );
+  }
+
+
+  if (
+    input.phone
+  ) {
+    addFilter(
+      `
+        (
+          REPLACE(
+            COALESCE(
+              p.primary_phone,
+              ''
+            ),
+            ' ',
+            ''
+          ) LIKE
+          '%' ||
+          REPLACE(
+            $VALUE,
+            ' ',
+            ''
+          ) ||
+          '%'
+        )
+      `,
+      input.phone,
+    );
+  }
+
+
+  if (
+    input.gender
+  ) {
+    addFilter(
+      `
+        LOWER(
+          COALESCE(
+            p.gender,
+            ''
+          )
+        ) =
+        LOWER($VALUE)
+      `,
+      input.gender,
+    );
+  }
+
+
+  if (
+    input.bloodGroup
+  ) {
+    addFilter(
+      `
+        LOWER(
+          COALESCE(
+            p.blood_group,
+            ''
+          )
+        ) =
+        LOWER($VALUE)
+      `,
+      input.bloodGroup,
+    );
+  }
+
+
+  if (
+    input.occupation
+  ) {
+    addFilter(
+      `
+        LOWER(
+          COALESCE(
+            p.occupation,
+            ''
+          )
+        ) LIKE
+        '%' ||
+        LOWER($VALUE) ||
+        '%'
+      `,
+      input.occupation,
+    );
+  }
+
+
+  if (
+    input.district
+  ) {
+    addFilter(
+      `
+        LOWER(
+          COALESCE(
+            p.district,
+            ''
+          )
+        ) LIKE
+        '%' ||
+        LOWER($VALUE) ||
+        '%'
+      `,
+      input.district,
+    );
+  }
+
+
+  if (
+    input.province
+  ) {
+    addFilter(
+      `
+        LOWER(
+          COALESCE(
+            p.province,
+            ''
+          )
+        ) LIKE
+        '%' ||
+        LOWER($VALUE) ||
+        '%'
+      `,
+      input.province,
+    );
+  }
+
+
+  /*
+   * Age filters
+   */
+
+  if (
+    input.ageMin !== null
+  ) {
+    addFilter(
+      `
+        EXTRACT(
+          YEAR
+          FROM AGE(
+            CURRENT_DATE,
+            p.date_of_birth
+          )
+        ) >= $VALUE
+      `,
+      input.ageMin,
+    );
+  }
+
+
+  if (
+    input.ageMax !== null
+  ) {
+    addFilter(
+      `
+        EXTRACT(
+          YEAR
+          FROM AGE(
+            CURRENT_DATE,
+            p.date_of_birth
+          )
+        ) <= $VALUE
+      `,
+      input.ageMax,
+    );
+  }
+
+
+  /*
+   * Height
+   */
+
+  if (
+    input.heightMin !== null
+  ) {
+    addFilter(
+      `
+        COALESCE(
+          p.height_cm,
+          0
+        ) >= $VALUE
+      `,
+      input.heightMin,
+    );
+  }
+
+
+  if (
+    input.heightMax !== null
+  ) {
+    addFilter(
+      `
+        COALESCE(
+          p.height_cm,
+          999999
+        ) <= $VALUE
+      `,
+      input.heightMax,
+    );
+  }
+
+
+  /*
+   * Weight
+   */
+
+  if (
+    input.weightMin !== null
+  ) {
+    addFilter(
+      `
+        COALESCE(
+          p.weight_kg,
+          0
+        ) >= $VALUE
+      `,
+      input.weightMin,
+    );
+  }
+
+
+  if (
+    input.weightMax !== null
+  ) {
+    addFilter(
+      `
+        COALESCE(
+          p.weight_kg,
+          999999
+        ) <= $VALUE
+      `,
+      input.weightMax,
+    );
+  }
+
+
+  /*
+   * ----------------------------------------------------------
+   * Candidate query
+   * ----------------------------------------------------------
+   */
+
+  const query = `
     SELECT
       p.patient_id,
+      p.hospital_id,
+
       p.patient_number,
+
       p.first_name,
       p.middle_name,
       p.last_name,
+
       p.date_of_birth,
+
+      EXTRACT(
+        YEAR
+        FROM AGE(
+          CURRENT_DATE,
+          p.date_of_birth
+        )
+      )::int AS age,
+
       p.gender,
       p.blood_group,
+
       p.height_cm,
       p.weight_kg,
-      p.nationality,
+
       p.primary_phone,
-      p.secondary_phone,
       p.occupation,
-      p.status,
-      p.hospital_id,
-      h.hospital_name
+
+      p.nationality,
+
+      p.district,
+      p.province,
+
+      p.address,
+
+      /*
+       * ------------------------------------------------------
+       * Surgery evidence
+       * ------------------------------------------------------
+       */
+
+      COALESCE(
+        (
+          SELECT
+            jsonb_agg(
+              jsonb_build_object(
+                'surgeryId',
+                s.surgery_id,
+
+                'name',
+                s.surgery_name,
+
+                'date',
+                s.surgery_date,
+
+                'bodySite',
+                s.body_site,
+
+                'laterality',
+                s.laterality,
+
+                'preoperativeDiagnosis',
+                s.preoperative_diagnosis,
+
+                'postoperativeDiagnosis',
+                s.postoperative_diagnosis
+              )
+              ORDER BY
+                s.surgery_date DESC
+            )
+          FROM public.surgeries s
+          WHERE
+            s.patient_id =
+              p.patient_id
+          LIMIT 10
+        ),
+        '[]'::jsonb
+      ) AS surgeries,
+
+
+      /*
+       * ------------------------------------------------------
+       * Fracture evidence
+       * ------------------------------------------------------
+       */
+
+      COALESCE(
+        (
+          SELECT
+            jsonb_agg(
+              jsonb_build_object(
+                'fractureId',
+                f.fracture_id,
+
+                'bodyPart',
+                f.body_part,
+
+                'laterality',
+                f.laterality,
+
+                'fractureType',
+                f.fracture_type,
+
+                'date',
+                f.fracture_date
+              )
+              ORDER BY
+                f.fracture_date DESC
+            )
+          FROM public.fractures f
+          WHERE
+            f.patient_id =
+              p.patient_id
+          LIMIT 10
+        ),
+        '[]'::jsonb
+      ) AS fractures,
+
+
+      /*
+       * ------------------------------------------------------
+       * Device evidence
+       * ------------------------------------------------------
+       */
+
+      COALESCE(
+        (
+          SELECT
+            jsonb_agg(
+              jsonb_build_object(
+                'deviceId',
+                d.device_id,
+
+                'type',
+                d.device_type,
+
+                'name',
+                d.device_name,
+
+                'manufacturer',
+                d.manufacturer,
+
+                'modelNumber',
+                d.model_number,
+
+                'serialNumber',
+                d.serial_number,
+
+                'bodySite',
+                d.body_site,
+
+                'laterality',
+                d.laterality
+              )
+            )
+          FROM public.medical_devices d
+          WHERE
+            d.patient_id =
+              p.patient_id
+          LIMIT 10
+        ),
+        '[]'::jsonb
+      ) AS devices,
+
+
+      /*
+       * ------------------------------------------------------
+       * Dental evidence
+       * ------------------------------------------------------
+       */
+
+      COALESCE(
+        (
+          SELECT
+            jsonb_agg(
+              jsonb_build_object(
+                'dentalRecordId',
+                dr.dental_record_id,
+
+                'toothNumber',
+                dr.tooth_number,
+
+                'condition',
+                dr.condition,
+
+                'treatment',
+                dr.treatment,
+
+                'fillingType',
+                dr.filling_type
+              )
+              ORDER BY
+                dr.record_date DESC
+            )
+          FROM public.dental_records dr
+          WHERE
+            dr.patient_id =
+              p.patient_id
+          LIMIT 10
+        ),
+        '[]'::jsonb
+      ) AS dental_records,
+
+
+      /*
+       * ------------------------------------------------------
+       * Observations
+       * ------------------------------------------------------
+       */
+
+      COALESCE(
+        (
+          SELECT
+            jsonb_agg(
+              jsonb_build_object(
+                'observationId',
+                o.observation_id,
+
+                'type',
+                o.observation_type,
+
+                'value',
+                o.observation_value,
+
+                'bodySite',
+                o.body_site,
+
+                'laterality',
+                o.laterality,
+
+                'date',
+                o.observed_date
+              )
+              ORDER BY
+                o.observed_date DESC
+            )
+          FROM public.clinical_observations o
+          WHERE
+            o.patient_id =
+              p.patient_id
+          LIMIT 20
+        ),
+        '[]'::jsonb
+      ) AS observations,
+
+
+      /*
+       * ------------------------------------------------------
+       * Treatments
+       * ------------------------------------------------------
+       */
+
+      COALESCE(
+        (
+          SELECT
+            jsonb_agg(
+              jsonb_build_object(
+                'treatmentId',
+                t.treatment_id,
+
+                'type',
+                t.treatment_type,
+
+                'name',
+                t.treatment_name,
+
+                'description',
+                t.description,
+
+                'bodySite',
+                t.body_site,
+
+                'laterality',
+                t.laterality,
+
+                'date',
+                t.treatment_date
+              )
+              ORDER BY
+                t.treatment_date DESC
+            )
+          FROM public.treatment_records t
+          WHERE
+            t.patient_id =
+              p.patient_id
+          LIMIT 20
+        ),
+        '[]'::jsonb
+      ) AS treatments,
+
+
+      /*
+       * ------------------------------------------------------
+       * Investigations
+       * ------------------------------------------------------
+       */
+
+      COALESCE(
+        (
+          SELECT
+            jsonb_agg(
+              jsonb_build_object(
+                'investigationId',
+                i.investigation_id,
+
+                'type',
+                i.investigation_type,
+
+                'name',
+                i.investigation_name,
+
+                'date',
+                COALESCE(
+                  i.performed_date,
+                  i.requested_date
+                ),
+
+                'result',
+                i.result_summary,
+
+                'value',
+                i.result_value,
+
+                'bodySite',
+                i.body_site
+              )
+              ORDER BY
+                COALESCE(
+                  i.performed_date,
+                  i.requested_date
+                ) DESC
+            )
+          FROM public.investigations i
+          WHERE
+            i.patient_id =
+              p.patient_id
+          LIMIT 20
+        ),
+        '[]'::jsonb
+      ) AS investigations
+
+
     FROM public.patients p
-    LEFT JOIN public.hospitals h
-      ON h.hospital_id = p.hospital_id
-    WHERE p.status = 'ACTIVE'
-      AND p.hospital_id = $1
-    ORDER BY p.patient_id DESC
-    LIMIT 1000
+
+    WHERE
+      ${where.join(
+        "\nAND ",
+      )}
+
+    ORDER BY
+      p.patient_id DESC
+
+    LIMIT ${DEFAULT_LIMIT};
   `;
 
-  const patientResult = await pool.query(
-    patientQuery,
-    [hospitalId],
-  );
 
-  if (patientResult.rows.length === 0) {
-    return [];
-  }
-
-  const patientIds =
-    patientResult.rows.map(
-      (patient) => patient.patient_id,
+  const result =
+    await pool.query(
+      query,
+      values,
     );
 
-  /*
-   * ---------------------------------------------------------
-   * 2. LOAD RELATED EHR DATA
-   * ---------------------------------------------------------
-   */
-
-  const [
-    surgeriesResult,
-    fracturesResult,
-    devicesResult,
-    dentalResult,
-    observationsResult,
-    treatmentsResult,
-    investigationsResult,
-  ] = await Promise.all([
-    pool.query(
-      `
-      SELECT
-        surgery_id,
-        patient_id,
-        surgery_name,
-        surgery_code,
-        body_site,
-        laterality,
-        preoperative_diagnosis,
-        surgery_date
-      FROM public.surgeries
-      WHERE patient_id = ANY($1::bigint[])
-      `,
-      [patientIds],
-    ),
-
-    pool.query(
-      `
-      SELECT
-        fracture_id,
-        patient_id,
-        body_part,
-        laterality,
-        fracture_type
-      FROM public.fractures
-      WHERE patient_id = ANY($1::bigint[])
-      `,
-      [patientIds],
-    ),
-
-    pool.query(
-      `
-      SELECT
-        device_id,
-        patient_id,
-        device_type,
-        device_name,
-        manufacturer,
-        model_number,
-        serial_number,
-        body_site,
-        laterality,
-        implantation_date
-      FROM public.medical_devices
-      WHERE patient_id = ANY($1::bigint[])
-      `,
-      [patientIds],
-    ),
-
-    pool.query(
-      `
-      SELECT
-        dental_record_id,
-        patient_id,
-        record_date,
-        tooth_number,
-        condition
-      FROM public.dental_records
-      WHERE patient_id = ANY($1::bigint[])
-      `,
-      [patientIds],
-    ),
-
-    pool.query(
-      `
-      SELECT
-        observation_id,
-        patient_id,
-        observation_type,
-        observation_value
-      FROM public.clinical_observations
-      WHERE patient_id = ANY($1::bigint[])
-      `,
-      [patientIds],
-    ),
-
-    pool.query(
-      `
-      SELECT
-        treatment_id,
-        patient_id,
-        treatment_type,
-        treatment_name,
-        description,
-        treatment_date
-      FROM public.treatment_records
-      WHERE patient_id = ANY($1::bigint[])
-      `,
-      [patientIds],
-    ),
-
-    pool.query(
-      `
-      SELECT
-        investigation_id,
-        patient_id,
-        investigation_type,
-        investigation_name,
-        result_summary,
-        result_value,
-        unit,
-        reference_range,
-        performed_date
-      FROM public.investigations
-      WHERE patient_id = ANY($1::bigint[])
-      `,
-      [patientIds],
-    ),
-  ]);
 
   /*
-   * ---------------------------------------------------------
-   * 3. GROUP CLINICAL DATA BY PATIENT
-   * ---------------------------------------------------------
+   * ----------------------------------------------------------
+   * EXPLAINABLE HEURISTIC SCORING
+   * ----------------------------------------------------------
    */
 
-  const groupByPatient = (rows) => {
-    const grouped = new Map();
+  const candidates =
+    result.rows.map(
+      (
+        row,
+      ) => {
+        const evidence = [];
 
-    for (const row of rows) {
-      if (!grouped.has(row.patient_id)) {
-        grouped.set(row.patient_id, []);
+
+        let score = 0;
+
+
+        /*
+         * Gender
+         */
+
+        if (
+          input.gender &&
+          normalizeText(
+            row.gender,
+          ) ===
+            input.gender
+        ) {
+          score +=
+            WEIGHTS.gender;
+
+          evidence.push({
+            key: "gender",
+            label:
+              "Gender match",
+            score:
+              WEIGHTS.gender,
+            details:
+              row.gender,
+          });
+        }
+
+
+        /*
+         * Blood group
+         */
+
+        if (
+          input.bloodGroup &&
+          normalizeText(
+            row.blood_group,
+          ) ===
+            input.bloodGroup
+        ) {
+          score +=
+            WEIGHTS.bloodGroup;
+
+          evidence.push({
+            key:
+              "bloodGroup",
+
+            label:
+              "Blood group match",
+
+            score:
+              WEIGHTS.bloodGroup,
+
+            details:
+              row.blood_group,
+          });
+        }
+
+
+        /*
+         * Age
+         */
+
+        const age =
+          Number(
+            row.age,
+          );
+
+        if (
+          input.ageMin !==
+            null ||
+          input.ageMax !==
+            null
+        ) {
+          const ageMatches =
+            (
+              input.ageMin ===
+                null ||
+              age >=
+                input.ageMin
+            ) &&
+            (
+              input.ageMax ===
+                null ||
+              age <=
+                input.ageMax
+            );
+
+          if (
+            ageMatches
+          ) {
+            score +=
+              WEIGHTS.age;
+
+            evidence.push({
+              key: "age",
+              label:
+                "Age range match",
+              score:
+                WEIGHTS.age,
+              details:
+                `${age} years`,
+            });
+          }
+        }
+
+
+        /*
+         * Height
+         */
+
+        if (
+          row.height_cm !==
+            null &&
+          (
+            input.heightMin !==
+              null ||
+            input.heightMax !==
+              null
+          )
+        ) {
+          const height =
+            Number(
+              row.height_cm,
+            );
+
+          const matches =
+            (
+              input.heightMin ===
+                null ||
+              height >=
+                input.heightMin
+            ) &&
+            (
+              input.heightMax ===
+                null ||
+              height <=
+                input.heightMax
+            );
+
+          if (
+            matches
+          ) {
+            score +=
+              WEIGHTS.height;
+
+            evidence.push({
+              key:
+                "height",
+
+              label:
+                "Height match",
+
+              score:
+                WEIGHTS.height,
+
+              details:
+                `${height} cm`,
+            });
+          }
+        }
+
+
+        /*
+         * Weight
+         */
+
+        if (
+          row.weight_kg !==
+            null &&
+          (
+            input.weightMin !==
+              null ||
+            input.weightMax !==
+              null
+          )
+        ) {
+          const weight =
+            Number(
+              row.weight_kg,
+            );
+
+          const matches =
+            (
+              input.weightMin ===
+                null ||
+              weight >=
+                input.weightMin
+            ) &&
+            (
+              input.weightMax ===
+                null ||
+              weight <=
+                input.weightMax
+            );
+
+          if (
+            matches
+          ) {
+            score +=
+              WEIGHTS.weight;
+
+            evidence.push({
+              key:
+                "weight",
+
+              label:
+                "Weight match",
+
+              score:
+                WEIGHTS.weight,
+
+              details:
+                `${weight} kg`,
+            });
+          }
+        }
+
+
+        /*
+         * Name
+         */
+
+        if (
+          input.name
+        ) {
+          const fullName =
+            normalizeText(
+              [
+                row.first_name,
+                row.middle_name,
+                row.last_name,
+              ]
+                .filter(
+                  Boolean,
+                )
+                .join(
+                  " ",
+                ),
+            );
+
+          if (
+            fullName.includes(
+              input.name,
+            )
+          ) {
+            score +=
+              WEIGHTS.name;
+
+            evidence.push({
+              key: "name",
+              label:
+                "Name fragment match",
+              score:
+                WEIGHTS.name,
+              details:
+                fullName,
+            });
+          }
+        }
+
+
+        /*
+         * Phone
+         */
+
+        if (
+          input.phone
+        ) {
+          const phone =
+            normalizeText(
+              row.primary_phone,
+            ).replace(
+              /\s/g,
+              "",
+            );
+
+          const searchedPhone =
+            input.phone.replace(
+              /\s/g,
+              "",
+            );
+
+          if (
+            phone.includes(
+              searchedPhone,
+            )
+          ) {
+            score +=
+              WEIGHTS.phone;
+
+            evidence.push({
+              key:
+                "phone",
+
+              label:
+                "Phone fragment match",
+
+              score:
+                WEIGHTS.phone,
+
+              details:
+                row.primary_phone,
+            });
+          }
+        }
+
+
+        /*
+         * Occupation
+         */
+
+        if (
+          input.occupation &&
+          normalizeText(
+            row.occupation,
+          ).includes(
+            input.occupation,
+          )
+        ) {
+          score +=
+            WEIGHTS.occupation;
+
+          evidence.push({
+            key:
+              "occupation",
+
+            label:
+              "Occupation match",
+
+            score:
+              WEIGHTS.occupation,
+
+            details:
+              row.occupation,
+          });
+        }
+
+
+        /*
+         * Surgery
+         */
+
+        if (
+          input.surgery
+        ) {
+          const matches =
+            (
+              row.surgeries ||
+              []
+            ).filter(
+              (
+                surgery,
+              ) =>
+                normalizeText(
+                  `${surgery.name || ""} ${surgery.bodySite || ""} ${surgery.preoperativeDiagnosis || ""} ${surgery.postoperativeDiagnosis || ""}`,
+                ).includes(
+                  input.surgery,
+                ),
+            );
+
+          if (
+            matches.length
+          ) {
+            score +=
+              WEIGHTS.surgery;
+
+            evidence.push({
+              key:
+                "surgery",
+
+              label:
+                "Previous surgery evidence",
+
+              score:
+                WEIGHTS.surgery,
+
+              details:
+                matches
+                  .map(
+                    (
+                      item,
+                    ) =>
+                      item.name,
+                  )
+                  .join(
+                    ", ",
+                  ),
+            });
+          }
+        }
+
+
+        /*
+         * Fracture
+         */
+
+        if (
+          input.fracture
+        ) {
+          const matches =
+            (
+              row.fractures ||
+              []
+            ).filter(
+              (
+                fracture,
+              ) =>
+                normalizeText(
+                  `${fracture.bodyPart || ""} ${fracture.fractureType || ""} ${fracture.laterality || ""}`,
+                ).includes(
+                  input.fracture,
+                ),
+            );
+
+          if (
+            matches.length
+          ) {
+            score +=
+              WEIGHTS.fracture;
+
+            evidence.push({
+              key:
+                "fracture",
+
+              label:
+                "Fracture history evidence",
+
+              score:
+                WEIGHTS.fracture,
+
+              details:
+                matches
+                  .map(
+                    (
+                      item,
+                    ) =>
+                      `${item.bodyPart || ""} ${item.laterality || ""}`.trim(),
+                  )
+                  .join(
+                    ", ",
+                  ),
+            });
+          }
+        }
+
+
+        /*
+         * Device
+         */
+
+        if (
+          input.device
+        ) {
+          const matches =
+            (
+              row.devices ||
+              []
+            ).filter(
+              (
+                device,
+              ) =>
+                normalizeText(
+                  `${device.type || ""} ${device.name || ""} ${device.manufacturer || ""} ${device.modelNumber || ""} ${device.serialNumber || ""} ${device.bodySite || ""}`,
+                ).includes(
+                  input.device,
+                ),
+            );
+
+          if (
+            matches.length
+          ) {
+            score +=
+              WEIGHTS.device;
+
+            evidence.push({
+              key:
+                "device",
+
+              label:
+                "Medical-device evidence",
+
+              score:
+                WEIGHTS.device,
+
+              details:
+                matches
+                  .map(
+                    (
+                      item,
+                    ) =>
+                      item.name ||
+                      item.type,
+                  )
+                  .join(
+                    ", ",
+                  ),
+            });
+          }
+        }
+
+
+        /*
+         * Dental
+         */
+
+        if (
+          input.dental
+        ) {
+          const matches =
+            (
+              row.dental_records ||
+              []
+            ).filter(
+              (
+                dental,
+              ) =>
+                normalizeText(
+                  `${dental.condition || ""} ${dental.treatment || ""} ${dental.fillingType || ""} ${dental.toothNumber || ""}`,
+                ).includes(
+                  input.dental,
+                ),
+            );
+
+          if (
+            matches.length
+          ) {
+            score +=
+              WEIGHTS.dental;
+
+            evidence.push({
+              key:
+                "dental",
+
+              label:
+                "Dental history evidence",
+
+              score:
+                WEIGHTS.dental,
+
+              details:
+                matches
+                  .map(
+                    (
+                      item,
+                    ) =>
+                      item.toothNumber
+                        ? `Tooth ${item.toothNumber}`
+                        : "Dental record",
+                  )
+                  .join(
+                    ", ",
+                  ),
+            });
+          }
+        }
+
+
+        /*
+         * Observation
+         */
+
+        if (
+          input.observation
+        ) {
+          const matches =
+            (
+              row.observations ||
+              []
+            ).filter(
+              (
+                observation,
+              ) =>
+                normalizeText(
+                  `${observation.type || ""} ${observation.value || ""} ${observation.bodySite || ""} ${observation.laterality || ""}`,
+                ).includes(
+                  input.observation,
+                ),
+            );
+
+          if (
+            matches.length
+          ) {
+            score +=
+              WEIGHTS.observation;
+
+            evidence.push({
+              key:
+                "observation",
+
+              label:
+                "Clinical observation evidence",
+
+              score:
+                WEIGHTS.observation,
+
+              details:
+                matches
+                  .map(
+                    (
+                      item,
+                    ) =>
+                      `${item.type}: ${item.value}`,
+                  )
+                  .join(
+                    "; ",
+                  ),
+            });
+          }
+        }
+
+
+        /*
+         * Treatment
+         */
+
+        if (
+          input.treatment
+        ) {
+          const matches =
+            (
+              row.treatments ||
+              []
+            ).filter(
+              (
+                treatment,
+              ) =>
+                normalizeText(
+                  `${treatment.type || ""} ${treatment.name || ""} ${treatment.description || ""} ${treatment.bodySite || ""}`,
+                ).includes(
+                  input.treatment,
+                ),
+            );
+
+          if (
+            matches.length
+          ) {
+            score +=
+              WEIGHTS.treatment;
+
+            evidence.push({
+              key:
+                "treatment",
+
+              label:
+                "Treatment history evidence",
+
+              score:
+                WEIGHTS.treatment,
+
+              details:
+                matches
+                  .map(
+                    (
+                      item,
+                    ) =>
+                      item.name ||
+                      item.type,
+                  )
+                  .join(
+                    ", ",
+                  ),
+            });
+          }
+        }
+
+
+        /*
+         * Investigation
+         */
+
+        if (
+          input.investigation
+        ) {
+          const matches =
+            (
+              row.investigations ||
+              []
+            ).filter(
+              (
+                investigation,
+              ) =>
+                normalizeText(
+                  `${investigation.type || ""} ${investigation.name || ""} ${investigation.result || ""} ${investigation.value || ""} ${investigation.bodySite || ""}`,
+                ).includes(
+                  input.investigation,
+                ),
+            );
+
+          if (
+            matches.length
+          ) {
+            score +=
+              WEIGHTS.investigation;
+
+            evidence.push({
+              key:
+                "investigation",
+
+              label:
+                "Investigation history evidence",
+
+              score:
+                WEIGHTS.investigation,
+
+              details:
+                matches
+                  .map(
+                    (
+                      item,
+                    ) =>
+                      item.name,
+                  )
+                  .join(
+                    ", ",
+                  ),
+            });
+          }
+        }
+
+
+        const normalizedScore =
+          Math.min(
+            100,
+            Math.round(
+              (
+                score /
+                MAX_SCORE
+              ) *
+                100,
+            ),
+          );
+
+
+        return {
+          patient: {
+            patientId:
+              row.patient_id,
+
+            hospitalId:
+              row.hospital_id,
+
+            patientNumber:
+              row.patient_number,
+
+            firstName:
+              row.first_name,
+
+            middleName:
+              row.middle_name,
+
+            lastName:
+              row.last_name,
+
+            dateOfBirth:
+              row.date_of_birth,
+
+            age:
+              row.age,
+
+            gender:
+              row.gender,
+
+            bloodGroup:
+              row.blood_group,
+
+            heightCm:
+              row.height_cm,
+
+            weightKg:
+              row.weight_kg,
+
+            primaryPhone:
+              row.primary_phone,
+
+            occupation:
+              row.occupation,
+
+            district:
+              row.district,
+
+            province:
+              row.province,
+          },
+
+          score,
+
+          normalizedScore,
+
+          evidence,
+
+          sourceCounts: {
+            surgeries:
+              (
+                row.surgeries ||
+                []
+              ).length,
+
+            fractures:
+              (
+                row.fractures ||
+                []
+              ).length,
+
+            devices:
+              (
+                row.devices ||
+                []
+              ).length,
+
+            dental:
+              (
+                row.dental_records ||
+                []
+              ).length,
+
+            observations:
+              (
+                row.observations ||
+                []
+              ).length,
+
+            treatments:
+              (
+                row.treatments ||
+                []
+              ).length,
+
+            investigations:
+              (
+                row.investigations ||
+                []
+              ).length,
+          },
+        };
+      },
+    );
+
+
+  candidates.sort(
+    (
+      a,
+      b,
+    ) => {
+      if (
+        b.score !==
+        a.score
+      ) {
+        return (
+          b.score -
+          a.score
+        );
       }
 
-      grouped.get(row.patient_id).push(row);
-    }
+      return String(
+        a.patient
+          .patientNumber ||
+          "",
+      ).localeCompare(
+        String(
+          b.patient
+            .patientNumber ||
+            "",
+        ),
+      );
+    },
+  );
 
-    return grouped;
+
+  return {
+    searchCriteria:
+      input,
+
+    weightModel: {
+      ...WEIGHTS,
+
+      maximumScore:
+        MAX_SCORE,
+
+      note:
+        "Explainable heuristic evidence weighting; not a medically validated probability.",
+    },
+
+    count:
+      candidates.length,
+
+    candidates,
   };
+}
 
-  const surgeriesByPatient =
-    groupByPatient(surgeriesResult.rows);
-
-  const fracturesByPatient =
-    groupByPatient(fracturesResult.rows);
-
-  const devicesByPatient =
-    groupByPatient(devicesResult.rows);
-
-  const dentalByPatient =
-    groupByPatient(dentalResult.rows);
-
-  const observationsByPatient =
-    groupByPatient(observationsResult.rows);
-
-  const treatmentsByPatient =
-    groupByPatient(treatmentsResult.rows);
-
-  const investigationsByPatient =
-    groupByPatient(investigationsResult.rows);
-
-  /*
-   * ---------------------------------------------------------
-   * 4. SCORE EACH PATIENT
-   * ---------------------------------------------------------
-   */
-
-  const scoredCandidates = [];
-
-  for (const patient of patientResult.rows) {
-    let score = 0;
-
-    const evidence = [];
-
-    /*
-     * GENDER
-     */
-
-    if (
-      criteria.gender &&
-      normalize(patient.gender) ===
-        normalize(criteria.gender)
-    ) {
-      score += WEIGHTS.gender;
-
-      addEvidence(
-        evidence,
-        "Gender",
-        `Gender matched: ${patient.gender}`,
-        "patients",
-      );
-    }
-
-    /*
-     * BLOOD GROUP
-     */
-
-    if (
-      criteria.bloodGroup &&
-      normalize(patient.blood_group) ===
-        normalize(criteria.bloodGroup)
-    ) {
-      score += WEIGHTS.bloodGroup;
-
-      addEvidence(
-        evidence,
-        "Blood Group",
-        `Blood group matched: ${patient.blood_group}`,
-        "patients",
-      );
-    }
-
-    /*
-     * AGE
-     */
-
-    const patientAge =
-      calculateAge(patient.date_of_birth);
-
-    if (
-      (
-        isNumberProvided(criteria.ageMin) ||
-        isNumberProvided(criteria.ageMax)
-      ) &&
-      patientAge !== null
-    ) {
-      const minPassed =
-        !isNumberProvided(criteria.ageMin) ||
-        patientAge >= Number(criteria.ageMin);
-
-      const maxPassed =
-        !isNumberProvided(criteria.ageMax) ||
-        patientAge <= Number(criteria.ageMax);
-
-      if (minPassed && maxPassed) {
-        score += WEIGHTS.age;
-
-        addEvidence(
-          evidence,
-          "Age",
-          `Age matched: ${patientAge} years`,
-          "patients",
-        );
-      }
-    }
-
-    /*
-     * HEIGHT
-     */
-
-    if (isNumberProvided(patient.height_cm)) {
-      const minPassed =
-        !isNumberProvided(criteria.heightMin) ||
-        Number(patient.height_cm) >=
-          Number(criteria.heightMin);
-
-      const maxPassed =
-        !isNumberProvided(criteria.heightMax) ||
-        Number(patient.height_cm) <=
-          Number(criteria.heightMax);
-
-      if (
-        (
-          isNumberProvided(criteria.heightMin) ||
-          isNumberProvided(criteria.heightMax)
-        ) &&
-        minPassed &&
-        maxPassed
-      ) {
-        score += WEIGHTS.height;
-
-        addEvidence(
-          evidence,
-          "Height",
-          `Height matched: ${patient.height_cm} cm`,
-          "patients",
-        );
-      }
-    }
-
-    /*
-     * WEIGHT
-     */
-
-    if (isNumberProvided(patient.weight_kg)) {
-      const minPassed =
-        !isNumberProvided(criteria.weightMin) ||
-        Number(patient.weight_kg) >=
-          Number(criteria.weightMin);
-
-      const maxPassed =
-        !isNumberProvided(criteria.weightMax) ||
-        Number(patient.weight_kg) <=
-          Number(criteria.weightMax);
-
-      if (
-        (
-          isNumberProvided(criteria.weightMin) ||
-          isNumberProvided(criteria.weightMax)
-        ) &&
-        minPassed &&
-        maxPassed
-      ) {
-        score += WEIGHTS.weight;
-
-        addEvidence(
-          evidence,
-          "Weight",
-          `Weight matched: ${patient.weight_kg} kg`,
-          "patients",
-        );
-      }
-    }
-
-    /*
-     * NAME
-     */
-
-    if (
-      criteria.partialName &&
-      (
-        containsValue(
-          patient.first_name,
-          criteria.partialName,
-        ) ||
-        containsValue(
-          patient.middle_name,
-          criteria.partialName,
-        ) ||
-        containsValue(
-          patient.last_name,
-          criteria.partialName,
-        )
-      )
-    ) {
-      score += WEIGHTS.name;
-
-      addEvidence(
-        evidence,
-        "Name",
-        "Name clue matched patient name",
-        "patients",
-      );
-    }
-
-    /*
-     * PHONE
-     */
-
-    if (
-      criteria.phoneFragment &&
-      (
-        containsValue(
-          patient.primary_phone,
-          criteria.phoneFragment,
-        ) ||
-        containsValue(
-          patient.secondary_phone,
-          criteria.phoneFragment,
-        )
-      )
-    ) {
-      score += WEIGHTS.phone;
-
-      addEvidence(
-        evidence,
-        "Phone",
-        "Phone fragment matched",
-        "patients",
-      );
-    }
-
-    /*
-     * OCCUPATION
-     */
-
-    if (
-      criteria.workplace &&
-      containsValue(
-        patient.occupation,
-        criteria.workplace,
-      )
-    ) {
-      score += WEIGHTS.occupation;
-
-      addEvidence(
-        evidence,
-        "Occupation",
-        `Occupation matched: ${patient.occupation}`,
-        "patients",
-      );
-    }
-
-    /*
-     * SURGERY
-     */
-
-    const surgeries =
-      surgeriesByPatient.get(
-        patient.patient_id,
-      ) || [];
-
-    if (criteria.previousSurgery) {
-      const matchedSurgery =
-        surgeries.find(
-          (surgery) =>
-            containsValue(
-              surgery.surgery_name,
-              criteria.previousSurgery,
-            ) ||
-            containsValue(
-              surgery.surgery_code,
-              criteria.previousSurgery,
-            ) ||
-            containsValue(
-              surgery.body_site,
-              criteria.previousSurgery,
-            ) ||
-            containsValue(
-              surgery.preoperative_diagnosis,
-              criteria.previousSurgery,
-            ),
-        );
-
-      if (matchedSurgery) {
-        score += WEIGHTS.surgery;
-
-        addEvidence(
-          evidence,
-          "Surgery",
-          `Previous surgery matched: ${matchedSurgery.surgery_name}`,
-          "surgeries",
-        );
-      }
-    }
-
-    /*
-     * FRACTURE
-     */
-
-    const fractures =
-      fracturesByPatient.get(
-        patient.patient_id,
-      ) || [];
-
-    if (criteria.fracture) {
-      const matchedFracture =
-        fractures.find(
-          (fracture) =>
-            containsValue(
-              fracture.body_part,
-              criteria.fracture,
-            ) ||
-            containsValue(
-              fracture.laterality,
-              criteria.fracture,
-            ) ||
-            containsValue(
-              fracture.fracture_type,
-              criteria.fracture,
-            ),
-        );
-
-      if (matchedFracture) {
-        score += WEIGHTS.fracture;
-
-        addEvidence(
-          evidence,
-          "Fracture",
-          `Fracture matched: ${matchedFracture.body_part} ${matchedFracture.laterality || ""}`.trim(),
-          "fractures",
-        );
-      }
-    }
-
-    /*
-     * MEDICAL DEVICE
-     */
-
-    const devices =
-      devicesByPatient.get(
-        patient.patient_id,
-      ) || [];
-
-    if (criteria.implantOrDevice) {
-      const matchedDevice =
-        devices.find(
-          (device) =>
-            containsValue(
-              device.device_type,
-              criteria.implantOrDevice,
-            ) ||
-            containsValue(
-              device.device_name,
-              criteria.implantOrDevice,
-            ) ||
-            containsValue(
-              device.manufacturer,
-              criteria.implantOrDevice,
-            ) ||
-            containsValue(
-              device.model_number,
-              criteria.implantOrDevice,
-            ) ||
-            containsValue(
-              device.body_site,
-              criteria.implantOrDevice,
-            ),
-        );
-
-      if (matchedDevice) {
-        score += WEIGHTS.device;
-
-        addEvidence(
-          evidence,
-          "Medical Device",
-          `Medical device matched: ${matchedDevice.device_name || matchedDevice.device_type}`,
-          "medical_devices",
-        );
-      }
-    }
-
-    /*
-     * DENTAL
-     */
-
-    const dentalRecords =
-      dentalByPatient.get(
-        patient.patient_id,
-      ) || [];
-
-    if (criteria.dentalClue) {
-      const matchedDental =
-        dentalRecords.find(
-          (record) =>
-            containsValue(
-              record.tooth_number,
-              criteria.dentalClue,
-            ) ||
-            containsValue(
-              record.condition,
-              criteria.dentalClue,
-            ),
-        );
-
-      if (matchedDental) {
-        score += WEIGHTS.dental;
-
-        addEvidence(
-          evidence,
-          "Dental",
-          `Dental clue matched: tooth ${matchedDental.tooth_number}, ${matchedDental.condition}`,
-          "dental_records",
-        );
-      }
-    }
-
-    /*
-     * CLINICAL OBSERVATION
-     */
-
-    const observations =
-      observationsByPatient.get(
-        patient.patient_id,
-      ) || [];
-
-    if (criteria.clinicalObservation) {
-      const matchedObservation =
-        observations.find(
-          (observation) =>
-            containsValue(
-              observation.observation_type,
-              criteria.clinicalObservation,
-            ) ||
-            containsValue(
-              observation.observation_value,
-              criteria.clinicalObservation,
-            ),
-        );
-
-      if (matchedObservation) {
-        score += WEIGHTS.observation;
-
-        addEvidence(
-          evidence,
-          "Clinical Observation",
-          `${matchedObservation.observation_type}: ${matchedObservation.observation_value}`,
-          "clinical_observations",
-        );
-      }
-    }
-
-    /*
-     * TREATMENT
-     */
-
-    const treatments =
-      treatmentsByPatient.get(
-        patient.patient_id,
-      ) || [];
-
-    if (criteria.treatment) {
-      const matchedTreatment =
-        treatments.find(
-          (treatment) =>
-            containsValue(
-              treatment.treatment_type,
-              criteria.treatment,
-            ) ||
-            containsValue(
-              treatment.treatment_name,
-              criteria.treatment,
-            ) ||
-            containsValue(
-              treatment.description,
-              criteria.treatment,
-            ),
-        );
-
-      if (matchedTreatment) {
-        score += WEIGHTS.treatment;
-
-        addEvidence(
-          evidence,
-          "Treatment",
-          `Treatment matched: ${matchedTreatment.treatment_name || matchedTreatment.treatment_type}`,
-          "treatment_records",
-        );
-      }
-    }
-
-    /*
-     * INVESTIGATION
-     */
-
-    const investigations =
-      investigationsByPatient.get(
-        patient.patient_id,
-      ) || [];
-
-    if (criteria.investigation) {
-      const matchedInvestigation =
-        investigations.find(
-          (investigation) =>
-            containsValue(
-              investigation.investigation_type,
-              criteria.investigation,
-            ) ||
-            containsValue(
-              investigation.investigation_name,
-              criteria.investigation,
-            ) ||
-            containsValue(
-              investigation.result_summary,
-              criteria.investigation,
-            ) ||
-            containsValue(
-              investigation.result_value,
-              criteria.investigation,
-            ),
-        );
-
-      if (matchedInvestigation) {
-        score += WEIGHTS.investigation;
-
-        addEvidence(
-          evidence,
-          "Investigation",
-          `Investigation matched: ${matchedInvestigation.investigation_name}`,
-          "investigations",
-        );
-      }
-    }
-
-    /*
-     * Only candidates with at least one matching clue
-     * are returned.
-     */
-
-    if (score > 0) {
-      scoredCandidates.push({
-        patientId: patient.patient_id,
-        patientNumber: patient.patient_number,
-        name: [
-          patient.first_name,
-          patient.middle_name,
-          patient.last_name,
-        ]
-          .filter(Boolean)
-          .join(" "),
-        dateOfBirth: patient.date_of_birth,
-        age: patientAge,
-        gender: patient.gender,
-        bloodGroup: patient.blood_group,
-        heightCm: patient.height_cm,
-        weightKg: patient.weight_kg,
-        primaryPhone: patient.primary_phone,
-        occupation: patient.occupation,
-        nationality: patient.nationality,
-        hospitalId: patient.hospital_id,
-        hospitalName: patient.hospital_name,
-        score,
-        evidence,
-      });
-    }
-  }
-
-  /*
-   * ---------------------------------------------------------
-   * 5. RANK CANDIDATES
-   * ---------------------------------------------------------
-   */
-
-  scoredCandidates.sort(
-    (a, b) => b.score - a.score,
-  );
-
-  return scoredCandidates.slice(
-    0,
-    50,
-  );
-};
 
 module.exports = {
-  searchCandidates,
+  searchPatients,
+  WEIGHTS,
+  MAX_SCORE,
 };

@@ -609,6 +609,161 @@
 
 
         <!-- =================================================
+             LONGITUDINAL SOURCE EVIDENCE
+             ================================================= -->
+
+        <div class="border-b p-5">
+          <div
+            class="flex flex-col justify-between gap-3 sm:flex-row sm:items-start"
+          >
+            <div>
+              <h2 class="section-title">
+                Longitudinal source evidence
+              </h2>
+
+              <p class="muted mt-1">
+                Existing clinical records that support ECIS review are shown below. These records are read from the patient's EHR and are not copied into a separate ECIS patient database.
+              </p>
+            </div>
+
+            <BaseButton
+              variant="secondary"
+              size="sm"
+              :loading="evidenceLoading"
+              @click="loadEvidence"
+            >
+              Refresh evidence
+            </BaseButton>
+          </div>
+        </div>
+
+        <div
+          v-if="evidenceError"
+          class="border-b border-red-100 bg-red-50 p-5 text-sm text-red-700"
+        >
+          {{ evidenceError }}
+        </div>
+
+        <div
+          v-else-if="evidenceLoading"
+          class="border-b p-8 text-center text-sm text-slate-400"
+        >
+          Loading source clinical evidence...
+        </div>
+
+        <div
+          v-else
+          class="border-b p-5"
+        >
+          <div
+            class="mb-4 flex flex-wrap gap-2"
+          >
+            <span
+              v-for="section in evidenceSections"
+              :key="section.key"
+              class="badge bg-slate-100 text-slate-600"
+            >
+              {{ section.label }} · {{ section.rows.length }}
+            </span>
+          </div>
+
+          <div
+            class="grid gap-4 lg:grid-cols-2"
+          >
+            <div
+              v-for="section in evidenceSections"
+              :key="`evidence-${section.key}`"
+              class="rounded-2xl border border-slate-100 bg-white p-4"
+            >
+              <div
+                class="flex items-center justify-between gap-3"
+              >
+                <div>
+                  <h3 class="font-bold text-slate-900">
+                    {{ section.label }}
+                  </h3>
+
+                  <p class="mt-1 text-xs text-slate-400">
+                    {{ section.rows.length }} record(s)
+                  </p>
+                </div>
+
+                <span class="badge">
+                  EHR
+                </span>
+              </div>
+
+              <div
+                v-if="section.rows.length"
+                class="mt-3 space-y-2"
+              >
+                <details
+                  v-for="row in section.rows"
+                  :key="row.key"
+                  class="rounded-xl bg-slate-50 p-3"
+                >
+                  <summary
+                    class="cursor-pointer list-none"
+                  >
+                    <div
+                      class="flex flex-col justify-between gap-1 sm:flex-row sm:items-start"
+                    >
+                      <div class="min-w-0">
+                        <p class="font-semibold text-slate-800">
+                          {{ row.title }}
+                        </p>
+
+                        <p
+                          v-if="row.subtitle"
+                          class="mt-1 text-xs text-slate-500"
+                        >
+                          {{ row.subtitle }}
+                        </p>
+                      </div>
+
+                      <span
+                        class="shrink-0 text-xs text-slate-400"
+                      >
+                        {{ row.date || "—" }}
+                      </span>
+                    </div>
+                  </summary>
+
+                  <div
+                    v-if="row.details.length"
+                    class="mt-3 grid gap-2 sm:grid-cols-2"
+                  >
+                    <div
+                      v-for="detail in row.details"
+                      :key="detail.label"
+                      class="rounded-lg bg-white p-2.5"
+                    >
+                      <p class="label">
+                        {{ detail.label }}
+                      </p>
+
+                      <p
+                        class="mt-1 whitespace-pre-line text-xs leading-5 text-slate-600"
+                      >
+                        {{ detail.value }}
+                      </p>
+                    </div>
+                  </div>
+                </details>
+              </div>
+
+              <div
+                v-else
+                class="mt-3 rounded-xl bg-slate-50 p-4 text-center text-xs text-slate-400"
+              >
+                No records in this source.
+              </div>
+            </div>
+          </div>
+        </div>
+
+
+        <!-- =================================================
              TREATMENT HISTORY
              ================================================= -->
 
@@ -1187,6 +1342,10 @@ import Modal
   from "../components/Modal.vue";
 
 import {
+  apiGet,
+} from "../services/api";
+
+import {
   useEHR,
 } from "../stores/ehr";
 
@@ -1275,6 +1434,1049 @@ const admissionLoading =
 
 const admissionError =
   ref("");
+
+
+/* ============================================================
+   LONGITUDINAL SOURCE EVIDENCE
+   ============================================================ */
+
+type EvidenceDetail = {
+  label: string;
+  value: string;
+};
+
+type EvidenceRow = {
+  key: string;
+  title: string;
+  subtitle: string;
+  date: string;
+  details: EvidenceDetail[];
+};
+
+type EvidenceSection = {
+  key: string;
+  label: string;
+  rows: EvidenceRow[];
+};
+
+
+const evidenceLoading =
+  ref(false);
+
+
+const evidenceError =
+  ref("");
+
+
+const evidence =
+  ref<Record<string, any[]>>({});
+
+
+const evidenceLabels: Array<[
+  string,
+  string
+]> = [
+  [
+    "encounters",
+    "Encounters",
+  ],
+  [
+    "admissions",
+    "Admissions",
+  ],
+  [
+    "bht",
+    "BHT",
+  ],
+  [
+    "surgeries",
+    "Surgery",
+  ],
+  [
+    "procedures",
+    "Procedures",
+  ],
+  [
+    "fractures",
+    "Fractures",
+  ],
+  [
+    "devices",
+    "Medical devices",
+  ],
+  [
+    "dental",
+    "Dental",
+  ],
+  [
+    "observations",
+    "Clinical observations",
+  ],
+  [
+    "treatments",
+    "Treatments",
+  ],
+  [
+    "investigations",
+    "Investigations",
+  ],
+  [
+    "medications",
+    "Medication",
+  ],
+];
+
+
+const evidenceSections =
+  computed<EvidenceSection[]>(
+    () =>
+      evidenceLabels.map(
+        ([key, label]) => ({
+          key,
+          label,
+          rows: (
+            Array.isArray(
+              evidence.value[key],
+            )
+              ? evidence.value[key]
+              : []
+          )
+            .slice(0, 8)
+            .map(
+              (
+                row: any,
+                index: number,
+              ) =>
+                normalizeEvidenceRow(
+                  key,
+                  row,
+                  index,
+                ),
+            ),
+        }),
+      ),
+  );
+
+
+function normalizeEvidenceRow(
+  source: string,
+  row: any,
+  index: number,
+): EvidenceRow {
+  const get = (
+    ...keys: string[]
+  ): any => {
+    for (
+      const key of keys
+    ) {
+      if (
+        row?.[key] !==
+          undefined &&
+        row?.[key] !== null &&
+        row?.[key] !== ""
+      ) {
+        return row[key];
+      }
+    }
+
+    return null;
+  };
+
+
+  const toText = (
+    value: any,
+  ): string => {
+    if (
+      value === null ||
+      value === undefined ||
+      value === ""
+    ) {
+      return "";
+    }
+
+    if (
+      typeof value ===
+        "boolean"
+    ) {
+      return value
+        ? "Yes"
+        : "No";
+    }
+
+    if (
+      typeof value ===
+        "object"
+    ) {
+      return JSON.stringify(
+        value,
+      );
+    }
+
+    return String(
+      value,
+    );
+  };
+
+
+  const details: EvidenceDetail[] = [];
+
+
+  const add = (
+    label: string,
+    value: any,
+  ) => {
+    const text =
+      toText(value);
+
+    if (!text) {
+      return;
+    }
+
+    details.push({
+      label,
+      value: text,
+    });
+  };
+
+
+  let title =
+    "Clinical record";
+
+  let subtitle =
+    "";
+
+  let date =
+    toText(
+      get(
+        "encounter_date",
+        "entry_date",
+        "surgery_date",
+        "procedure_date",
+        "fracture_date",
+        "record_date",
+        "observed_date",
+        "treatment_date",
+        "performed_date",
+        "requested_date",
+        "start_date",
+        "implantation_date",
+      ),
+    );
+
+
+  switch (
+    source
+  ) {
+    case "encounters":
+      title =
+        toText(
+          get(
+            "encounter_type",
+          ),
+        ) ||
+        "Clinical encounter";
+
+      subtitle =
+        toText(
+          get(
+            "chief_complaint",
+            "department",
+          ),
+        );
+
+      add(
+        "Department",
+        get(
+          "department",
+        ),
+      );
+
+      add(
+        "Status",
+        get("status"),
+      );
+
+      add(
+        "Chief complaint",
+        get(
+          "chief_complaint",
+        ),
+      );
+
+      add(
+        "Notes",
+        get("notes"),
+      );
+      break;
+
+
+    case "admissions":
+      title =
+        toText(
+          get(
+            "admission_number",
+          ),
+        ) ||
+        "Inpatient admission";
+
+      subtitle =
+        toText(
+          get(
+            "ward_name",
+            "admission_diagnosis",
+          ),
+        );
+
+      date =
+        toText(
+          get(
+            "admission_date",
+          ),
+        );
+
+      add(
+        "Ward",
+        get("ward_name"),
+      );
+
+      add(
+        "Bed",
+        get("bed_number"),
+      );
+
+      add(
+        "Diagnosis",
+        get(
+          "admission_diagnosis",
+        ),
+      );
+
+      add(
+        "Reason",
+        get(
+          "admission_reason",
+        ),
+      );
+
+      add(
+        "Doctor",
+        get("doctor_name"),
+      );
+
+      add(
+        "Discharge diagnosis",
+        get(
+          "discharge_diagnosis",
+        ),
+      );
+      break;
+
+
+    case "bht":
+      title =
+        toText(
+          get(
+            "entry_title",
+            "entry_type",
+          ),
+        ) ||
+        "BHT entry";
+
+      subtitle =
+        toText(
+          get(
+            "diagnosis",
+            "assessment",
+          ),
+        );
+
+      add(
+        "Entry type",
+        get("entry_type"),
+      );
+
+      add(
+        "Diagnosis",
+        get("diagnosis"),
+      );
+
+      add(
+        "Assessment",
+        get("assessment"),
+      );
+
+      add(
+        "Plan",
+        get("plan"),
+      );
+
+      add(
+        "Vitals",
+        [
+          get("temperature_c")
+            ? `Temp ${get("temperature_c")} °C`
+            : "",
+          get("pulse_bpm")
+            ? `Pulse ${get("pulse_bpm")} bpm`
+            : "",
+          get("systolic_bp") !== null &&
+          get("diastolic_bp") !== null
+            ? `BP ${get("systolic_bp")}/${get("diastolic_bp")}`
+            : "",
+          get("spo2_percent")
+            ? `SpO₂ ${get("spo2_percent")}%`
+            : "",
+        ]
+          .filter(Boolean)
+          .join(" · "),
+      );
+
+      add(
+        "Recorded by",
+        get(
+          "recorded_by_name",
+        ),
+      );
+      break;
+
+
+    case "surgeries":
+      title =
+        toText(
+          get(
+            "surgery_name",
+          ),
+        ) ||
+        "Surgery";
+
+      subtitle =
+        toText(
+          get(
+            "postoperative_diagnosis",
+            "preoperative_diagnosis",
+            "body_site",
+          ),
+        );
+
+      add(
+        "Body site",
+        get("body_site"),
+      );
+
+      add(
+        "Laterality",
+        get("laterality"),
+      );
+
+      add(
+        "Pre-op diagnosis",
+        get(
+          "preoperative_diagnosis",
+        ),
+      );
+
+      add(
+        "Post-op diagnosis",
+        get(
+          "postoperative_diagnosis",
+        ),
+      );
+
+      add(
+        "Findings",
+        get("findings"),
+      );
+
+      add(
+        "Surgical notes",
+        get("surgical_notes"),
+      );
+
+      add(
+        "Surgeon",
+        get("surgeon_name"),
+      );
+      break;
+
+
+    case "procedures":
+      title =
+        toText(
+          get(
+            "procedure_name",
+          ),
+        ) ||
+        "Procedure";
+
+      subtitle =
+        toText(
+          get(
+            "indication",
+            "body_site",
+          ),
+        );
+
+      add(
+        "Body site",
+        get("body_site"),
+      );
+
+      add(
+        "Laterality",
+        get("laterality"),
+      );
+
+      add(
+        "Indication",
+        get("indication"),
+      );
+
+      add(
+        "Findings",
+        get("findings"),
+      );
+
+      add(
+        "Outcome",
+        get("outcome"),
+      );
+
+      add(
+        "Performed by",
+        get(
+          "performed_by_name",
+        ),
+      );
+      break;
+
+
+    case "fractures":
+      title =
+        toText(
+          get("body_part"),
+        )
+          ? `Fracture · ${toText(get("body_part"))}`
+          : "Fracture";
+
+      subtitle =
+        toText(
+          get(
+            "fracture_type",
+            "laterality",
+          ),
+        );
+
+      add(
+        "Body part",
+        get("body_part"),
+      );
+
+      add(
+        "Laterality",
+        get("laterality"),
+      );
+
+      add(
+        "Fracture type",
+        get("fracture_type"),
+      );
+
+      add(
+        "Treatment",
+        get(
+          "treatment_description",
+        ),
+      );
+
+      add(
+        "Healed date",
+        get("healed_date"),
+      );
+
+      add(
+        "Notes",
+        get("notes"),
+      );
+      break;
+
+
+    case "devices":
+      title =
+        toText(
+          get(
+            "device_name",
+            "device_type",
+          ),
+        ) ||
+        "Medical device";
+
+      subtitle =
+        toText(
+          get(
+            "body_site",
+            "manufacturer",
+          ),
+        );
+
+      add(
+        "Device type",
+        get("device_type"),
+      );
+
+      add(
+        "Manufacturer",
+        get("manufacturer"),
+      );
+
+      add(
+        "Model",
+        get("model_number"),
+      );
+
+      add(
+        "Serial number",
+        get("serial_number"),
+      );
+
+      add(
+        "Body site",
+        get("body_site"),
+      );
+
+      add(
+        "Laterality",
+        get("laterality"),
+      );
+
+      add(
+        "Status",
+        get("status"),
+      );
+      break;
+
+
+    case "dental":
+      title =
+        get("tooth_number") !== null
+          ? `Dental record · Tooth ${toText(get("tooth_number"))}`
+          : "Dental record";
+
+      subtitle =
+        toText(
+          get(
+            "condition",
+            "treatment",
+          ),
+        );
+
+      add(
+        "Tooth number",
+        get("tooth_number"),
+      );
+
+      add(
+        "Condition",
+        get("condition"),
+      );
+
+      add(
+        "Treatment",
+        get("treatment"),
+      );
+
+      add(
+        "Filling type",
+        get("filling_type"),
+      );
+
+      add(
+        "Crown present",
+        get("crown_present"),
+      );
+
+      add(
+        "Implant present",
+        get("implant_present"),
+      );
+      break;
+
+
+    case "observations":
+      title =
+        toText(
+          get(
+            "observation_type",
+          ),
+        ) ||
+        "Clinical observation";
+
+      subtitle =
+        toText(
+          get(
+            "observation_value",
+            "body_site",
+          ),
+        );
+
+      add(
+        "Observation",
+        get(
+          "observation_value",
+        ),
+      );
+
+      add(
+        "Body site",
+        get("body_site"),
+      );
+
+      add(
+        "Laterality",
+        get("laterality"),
+      );
+
+      add(
+        "Recorded by",
+        get(
+          "recorded_by_name",
+        ),
+      );
+
+      add(
+        "Notes",
+        get("notes"),
+      );
+      break;
+
+
+    case "treatments":
+      title =
+        toText(
+          get(
+            "treatment_name",
+            "treatment_type",
+          ),
+        ) ||
+        "Treatment";
+
+      subtitle =
+        toText(
+          get(
+            "description",
+            "body_site",
+          ),
+        );
+
+      add(
+        "Treatment type",
+        get(
+          "treatment_type",
+        ),
+      );
+
+      add(
+        "Description",
+        get("description"),
+      );
+
+      add(
+        "Body site",
+        get("body_site"),
+      );
+
+      add(
+        "Laterality",
+        get("laterality"),
+      );
+
+      add(
+        "Outcome",
+        get("outcome"),
+      );
+
+      add(
+        "Complications",
+        get("complications"),
+      );
+
+      add(
+        "Performed by",
+        get(
+          "performed_by_name",
+        ),
+      );
+      break;
+
+
+    case "investigations":
+      title =
+        toText(
+          get(
+            "investigation_name",
+          ),
+        ) ||
+        "Investigation";
+
+      subtitle =
+        toText(
+          get(
+            "result_summary",
+            "clinical_notes",
+          ),
+        );
+
+      add(
+        "Type",
+        get(
+          "investigation_type",
+        ),
+      );
+
+      add(
+        "Result",
+        get("result_summary"),
+      );
+
+      add(
+        "Value",
+        get("result_value"),
+      );
+
+      add(
+        "Unit",
+        get("unit"),
+      );
+
+      add(
+        "Body site",
+        get("body_site"),
+      );
+
+      add(
+        "Priority",
+        get("priority"),
+      );
+
+      add(
+        "Status",
+        get("status"),
+      );
+
+      add(
+        "Verified by",
+        get(
+          "verified_by_name",
+        ),
+      );
+      break;
+
+
+    case "medications":
+      title =
+        toText(
+          get(
+            "medication_name",
+          ),
+        ) ||
+        "Medication order";
+
+      subtitle =
+        toText(
+          get(
+            "dosage",
+            "frequency",
+          ),
+        );
+
+      date =
+        toText(
+          get(
+            "start_date",
+            "encounter_date",
+          ),
+        );
+
+      add(
+        "Strength",
+        get("strength"),
+      );
+
+      add(
+        "Dosage",
+        get("dosage"),
+      );
+
+      add(
+        "Route",
+        get("route"),
+      );
+
+      add(
+        "Frequency",
+        get("frequency"),
+      );
+
+      add(
+        "Indication",
+        get("indication"),
+      );
+
+      add(
+        "Instructions",
+        get("instructions"),
+      );
+
+      add(
+        "Order status",
+        get("order_status"),
+      );
+
+      add(
+        "Prescriber",
+        get(
+          "prescriber_name",
+        ),
+      );
+      break;
+
+
+    default:
+      add(
+        "Record",
+        JSON.stringify(
+          row,
+        ),
+      );
+      break;
+  }
+
+
+  return {
+    key:
+      `${source}-${String(
+        get(
+          "encounter_id",
+          "admission_id",
+          "bht_entry_id",
+          "surgery_id",
+          "procedure_id",
+          "fracture_id",
+          "device_id",
+          "dental_record_id",
+          "observation_id",
+          "treatment_id",
+          "investigation_id",
+          "medication_order_id",
+        ) ?? index
+      )}-${index}`,
+
+    title,
+
+    subtitle,
+
+    date: formatEvidenceDate(
+      date,
+    ),
+
+    details:
+      details.slice(
+        0,
+        8,
+      ),
+  };
+}
+
+
+function formatEvidenceDate(
+  value: string,
+): string {
+  if (!value) {
+    return "";
+  }
+
+  const date =
+    new Date(value);
+
+  if (
+    Number.isNaN(
+      date.getTime(),
+    )
+  ) {
+    return value;
+  }
+
+  return date.toLocaleString(
+    "en-GB",
+    {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    },
+  );
+}
+
+
+async function loadEvidence() {
+  const patientId =
+    String(
+      route.params.id ??
+        "",
+    );
+
+  if (!patientId) {
+    evidence.value = {};
+    evidenceError.value =
+      "Patient ID is missing.";
+    return;
+  }
+
+  evidenceLoading.value =
+    true;
+
+  evidenceError.value =
+    "";
+
+  try {
+    const response =
+      await apiGet<any>(
+        `/ecis/candidates/${patientId}/evidence`,
+      );
+
+    const data =
+      response?.data ||
+      {};
+
+    evidence.value =
+      data.sources ||
+      data.evidence ||
+      {};
+  } catch (error) {
+    evidence.value =
+      {};
+
+    evidenceError.value =
+      error instanceof Error
+        ? error.message
+        : "Unable to load longitudinal source evidence.";
+  } finally {
+    evidenceLoading.value =
+      false;
+  }
+}
+
+
+function evidenceCount(
+  key: string,
+): number {
+  const rows =
+    evidence.value[key];
+
+  return Array.isArray(rows)
+    ? rows.length
+    : 0;
+}
 
 
 function formatDateTime(
@@ -1449,4 +2651,5 @@ function save() {
  * Load admission history when the Patient EHR opens.
  */
 void loadAdmissionHistory();
+void loadEvidence();
 </script>

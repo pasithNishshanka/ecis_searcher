@@ -1,65 +1,129 @@
 const surgeryService = require("../services/surgery.service");
 
-async function createSurgery(req, res, next) {
+async function createSurgery(
+  req,
+  res,
+  next,
+) {
   try {
-    const {
-      patientId,
-      surgeryName,
-    } = req.body;
+    const patientId =
+      req.body?.patientId;
+
+    const surgeryName =
+      String(
+        req.body?.surgeryName ??
+          "",
+      ).trim();
 
     if (!patientId) {
       return res.status(400).json({
         success: false,
-        message: "patientId is required",
+        message:
+          "patientId is required",
       });
     }
 
-    if (
-      !surgeryName ||
-      !surgeryName.trim()
-    ) {
+    if (!surgeryName) {
       return res.status(400).json({
         success: false,
-        message: "surgeryName is required",
+        message:
+          "surgeryName is required",
       });
     }
 
-    const surgery =
-      await surgeryService.createSurgery({
-        ...req.body,
-
-        hospitalId:
-          req.user?.hospitalId,
-
-        surgeonUserId:
-          req.user?.userId,
-      });
+    const result =
+      await surgeryService.createSurgery(
+        {
+          ...req.body,
+          hospitalId:
+            req.user?.hospitalId,
+          surgeonUserId:
+            req.user?.userId,
+        },
+      );
 
     return res.status(201).json({
       success: true,
       message:
         "Surgery record created successfully",
-      data: surgery,
+      data: result.surgery,
+      context: {
+        encounter:
+          result.encounter,
+        admission:
+          result.admission,
+      },
     });
   } catch (error) {
     if (
-      error.message ===
-      "Patient not found"
+      error.message.includes(
+        "required",
+      ) ||
+      error.message.includes(
+        "invalid",
+      ) ||
+      error.message.includes(
+        "future",
+      ) ||
+      error.message.includes(
+        "incomplete",
+      )
     ) {
-      return res.status(404).json({
+      return res.status(400).json({
         success: false,
-        message: error.message,
+        message:
+          error.message,
       });
     }
 
     if (
       error.message.includes(
-        "does not belong",
+        "not belong",
+      ) ||
+      error.message.includes(
+        "not active",
       )
     ) {
       return res.status(403).json({
         success: false,
-        message: error.message,
+        message:
+          error.message,
+      });
+    }
+
+    next(error);
+  }
+}
+
+async function getPatientClinicalContext(
+  req,
+  res,
+  next,
+) {
+  try {
+    const context =
+      await surgeryService.getPatientClinicalContext(
+        req.params.patientId,
+        req.user?.hospitalId,
+      );
+
+    return res.status(200).json({
+      success: true,
+      data: context,
+    });
+  } catch (error) {
+    if (
+      error.message.includes(
+        "not found",
+      ) ||
+      error.message.includes(
+        "incomplete",
+      )
+    ) {
+      return res.status(404).json({
+        success: false,
+        message:
+          error.message,
       });
     }
 
@@ -73,13 +137,10 @@ async function getPatientSurgeries(
   next,
 ) {
   try {
-    const {
-      patientId,
-    } = req.params;
-
     const surgeries =
       await surgeryService.getPatientSurgeries(
-        patientId,
+        req.params.patientId,
+        req.user?.hospitalId,
       );
 
     return res.status(200).json({
@@ -88,6 +149,21 @@ async function getPatientSurgeries(
       data: surgeries,
     });
   } catch (error) {
+    if (
+      error.message.includes(
+        "incomplete",
+      ) ||
+      error.message.includes(
+        "must be",
+      )
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          error.message,
+      });
+    }
+
     next(error);
   }
 }
@@ -98,13 +174,10 @@ async function getSurgeryById(
   next,
 ) {
   try {
-    const {
-      surgeryId,
-    } = req.params;
-
     const surgery =
       await surgeryService.getSurgeryById(
-        surgeryId,
+        req.params.surgeryId,
+        req.user?.hospitalId,
       );
 
     if (!surgery) {
@@ -126,6 +199,7 @@ async function getSurgeryById(
 
 module.exports = {
   createSurgery,
+  getPatientClinicalContext,
   getPatientSurgeries,
   getSurgeryById,
 };

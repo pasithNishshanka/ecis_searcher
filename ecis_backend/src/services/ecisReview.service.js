@@ -1,306 +1,494 @@
 const pool = require("../config/database");
 
-const VALID_STATUSES = ["REJECTED", "NEEDS_MORE_EVIDENCE"];
+const VALID_STATUSES = [
+  "REJECTED",
+  "NEEDS_MORE_EVIDENCE",
+];
 
-const reviewCandidate = async ({
-  emergencyCaseId,
-  patientId,
-  reviewedBy,
+function positiveInteger(value, fieldName) {
+  const number = Number(value);
+
+  if (!Number.isInteger(number) || number <= 0) {
+    throw new Error(
+      `${fieldName} must be a positive integer`,
+    );
+  }
+
+  return number;
+}
+
+async function reviewCandidate({
+  emergencyCaseId: emergencyCaseIdValue,
+  patientId: patientIdValue,
+  reviewedBy: reviewedByValue,
   reviewStatus,
   reviewReason,
-}) => {
-  /*
-   * ---------------------------------------------------------
-   * 1. VALIDATE REVIEW STATUS
-   * ---------------------------------------------------------
-   */
-
-  if (!VALID_STATUSES.includes(reviewStatus)) {
-    throw new Error(
-      "Invalid review status. Allowed values: CONFIRMED, REJECTED, NEEDS_MORE_EVIDENCE",
+  hospitalId: hospitalIdValue,
+}) {
+  const emergencyCaseId =
+    positiveInteger(
+      emergencyCaseIdValue,
+      "emergencyCaseId",
     );
-  }
 
-  /*
-   * ---------------------------------------------------------
-   * 2. VALIDATE REQUIRED VALUES
-   * ---------------------------------------------------------
-   */
+  const patientId =
+    positiveInteger(
+      patientIdValue,
+      "patientId",
+    );
 
-  if (!emergencyCaseId) {
-    throw new Error("emergencyCaseId is required");
-  }
+  const reviewedBy =
+    positiveInteger(
+      reviewedByValue,
+      "reviewedBy",
+    );
 
-  if (!patientId) {
-    throw new Error("patientId is required");
-  }
+  const hospitalId =
+    positiveInteger(
+      hospitalIdValue,
+      "hospitalId",
+    );
 
-  if (!reviewedBy) {
-    throw new Error("reviewedBy is required");
-  }
-
-  /*
-   * A confirmed or rejected decision should have
-   * an explanation for auditability.
-   */
+  const normalizedStatus =
+    String(
+      reviewStatus || "",
+    )
+      .trim()
+      .toUpperCase();
 
   if (
-    (reviewStatus === "CONFIRMED" || reviewStatus === "REJECTED") &&
-    (!reviewReason || !reviewReason.trim())
+    !VALID_STATUSES.includes(
+      normalizedStatus,
+    )
   ) {
     throw new Error(
-      "reviewReason is required for CONFIRMED or REJECTED decisions",
+      "Invalid review status. Allowed values: REJECTED, NEEDS_MORE_EVIDENCE",
     );
   }
 
-  /*
-   * ---------------------------------------------------------
-   * 3. VERIFY EMERGENCY CASE
-   * ---------------------------------------------------------
-   */
+  const reason =
+    String(
+      reviewReason || "",
+    ).trim();
 
-  const emergencyCaseResult = await pool.query(
-    `
-        SELECT
+  if (!reason) {
+    throw new Error(
+      "reviewReason is required for a candidate review",
+    );
+  }
+
+  const client =
+    await pool.connect();
+
+  try {
+    await client.query(
+      "BEGIN",
+    );
+
+    /*
+     * --------------------------------------------------------
+     * 1. Lock emergency case
+     * --------------------------------------------------------
+     */
+
+    const emergencyCaseResult =
+      await client.query(
+        `
+          SELECT
             emergency_case_id,
             hospital_id,
             patient_id,
             case_number,
+            unidentified_patient,
             status
-        FROM public.emergency_cases
-        WHERE emergency_case_id = $1
+          FROM public.emergency_cases
+          WHERE
+            emergency_case_id = $1
+            AND hospital_id = $2
+          FOR UPDATE;
         `,
-    [emergencyCaseId],
-  );
+        [
+          emergencyCaseId,
+          hospitalId,
+        ],
+      );
 
-  if (emergencyCaseResult.rows.length === 0) {
-    throw new Error("Emergency case not found");
-  }
+    if (
+      emergencyCaseResult.rowCount ===
+      0
+    ) {
+      throw new Error(
+        "Emergency case not found for the authenticated hospital",
+      );
+    }
 
-  const emergencyCase = emergencyCaseResult.rows[0];
+    const emergencyCase =
+      emergencyCaseResult.rows[0];
 
-  /*
-   * ---------------------------------------------------------
-   * 4. VERIFY PATIENT
-   * ---------------------------------------------------------
-   */
+    /*
+     * Candidate review is only meaningful
+     * while the case is still unidentified.
+     */
 
-  const patientResult = await pool.query(
-    `
-        SELECT
+    if (
+      !emergencyCase.unidentified_patient
+    ) {
+      throw new Error(
+        "Candidate review is only available while the emergency case is unidentified",
+      );
+    }
+
+    /*
+     * --------------------------------------------------------
+     * 2. Validate patient candidate
+     * --------------------------------------------------------
+     */
+
+    const patientResult =
+      await client.query(
+        `
+          SELECT
             patient_id,
             hospital_id,
             patient_number,
             first_name,
             middle_name,
             last_name,
-            status
-        FROM public.patients
-        WHERE patient_id = $1
+            status,
+            date_of_birth
+          FROM public.patients
+          WHERE
+            patient_id = $1
+            AND hospital_id = $2
+            AND status = 'ACTIVE'
+            AND date_of_birth <=
+                CURRENT_DATE -
+                INTERVAL '18 years'
+          FOR SHARE;
         `,
-    [patientId],
-  );
+        [
+          patientId,
+          hospitalId,
+        ],
+      );
 
-  if (patientResult.rows.length === 0) {
-    throw new Error("Patient not found");
-  }
+    if (
+      patientResult.rowCount ===
+      0
+    ) {
+      throw new Error(
+        "Adult patient not found for the authenticated hospital",
+      );
+    }
 
-  const patient = patientResult.rows[0];
+    const patient =
+      patientResult.rows[0];
 
-  /*
-   * ---------------------------------------------------------
-   * 5. VERIFY REVIEWER
-   * ---------------------------------------------------------
-   */
+    /*
+     * --------------------------------------------------------
+     * 3. Validate authenticated reviewer
+     * --------------------------------------------------------
+     */
 
-  const reviewerResult = await pool.query(
-    `
-        SELECT
+    const reviewerResult =
+      await client.query(
+        `
+          SELECT
             user_id,
             hospital_id,
             full_name,
-            username
-        FROM public.hospital_users
-        WHERE user_id = $1
+            username,
+            role,
+            is_active
+          FROM public.hospital_users
+          WHERE
+            user_id = $1
+            AND hospital_id = $2
+          LIMIT 1
+          FOR SHARE;
         `,
-    [reviewedBy],
-  );
+        [
+          reviewedBy,
+          hospitalId,
+        ],
+      );
 
-  if (reviewerResult.rows.length === 0) {
-    throw new Error("Reviewer not found");
-  }
+    if (
+      reviewerResult.rowCount ===
+        0 ||
+      !reviewerResult.rows[0]
+        .is_active
+    ) {
+      throw new Error(
+        "Authenticated reviewer was not found",
+      );
+    }
 
-  const reviewer = reviewerResult.rows[0];
+    const reviewer =
+      reviewerResult.rows[0];
 
-  /*
-   * ---------------------------------------------------------
-   * 6. HOSPITAL CONSISTENCY CHECK
-   * ---------------------------------------------------------
-   *
-   * The emergency case, patient and reviewer should belong
-   * to the same hospital in this development architecture.
-   */
-
-  if (emergencyCase.hospital_id !== patient.hospital_id) {
-    throw new Error("Emergency case and patient belong to different hospitals");
-  }
-
-  if (emergencyCase.hospital_id !== reviewer.hospital_id) {
-    throw new Error("Reviewer does not belong to the emergency case hospital");
-  }
-
-  /*
-   * ---------------------------------------------------------
-   * 7. HANDLE EXISTING REVIEW FOR SAME CASE + PATIENT
-   * ---------------------------------------------------------
-   */
-
-  const existingReviewResult = await pool.query(
-    `
-        SELECT
-            review_id,
-            review_status,
-            review_reason,
-            reviewed_by,
-            reviewed_at
-        FROM public.ecis_candidate_reviews
-        WHERE emergency_case_id = $1
-          AND patient_id = $2
-        ORDER BY reviewed_at DESC
-        LIMIT 1
-        `,
-    [emergencyCaseId, patientId],
-  );
-
-  if (existingReviewResult.rows.length > 0) {
-    const existingReview = existingReviewResult.rows[0];
+    if (
+      String(
+        reviewer.role || "",
+      )
+        .trim()
+        .toUpperCase() !==
+      "DOCTOR"
+    ) {
+      throw new Error(
+        "Only an authenticated doctor can review an ECIS candidate",
+      );
+    }
 
     /*
-     * A candidate should not be silently changed from one
-     * decision to another. Record a new review only when
-     * explicitly requested in a future revision workflow.
+     * --------------------------------------------------------
+     * 4. Prevent review after confirmed identity
+     * --------------------------------------------------------
      */
 
-    throw new Error(
-      `A review already exists for this candidate with status ${existingReview.review_status}`,
-    );
-  }
+    const existingConfirmedResult =
+      await client.query(
+        `
+          SELECT
+            review_id,
+            review_status,
+            reviewed_at
+          FROM public.ecis_candidate_reviews
+          WHERE
+            emergency_case_id = $1
+            AND patient_id = $2
+            AND review_status = 'CONFIRMED'
+          ORDER BY
+            reviewed_at DESC,
+            review_id DESC
+          LIMIT 1;
+        `,
+        [
+          emergencyCaseId,
+          patientId,
+        ],
+      );
 
-  /*
-   * ---------------------------------------------------------
-   * 8. INSERT REVIEW
-   * ---------------------------------------------------------
-   */
+    if (
+      existingConfirmedResult.rowCount >
+      0
+    ) {
+      throw new Error(
+        "This candidate has already been confirmed for the emergency case",
+      );
+    }
 
-  const insertResult = await pool.query(
-    `
-        INSERT INTO public.ecis_candidate_reviews (
+    /*
+     * --------------------------------------------------------
+     * 5. Insert review
+     *
+     * Important:
+     * ecis_candidate_reviews does NOT contain hospital_id.
+     * Hospital ownership is validated through the related
+     * emergency case, patient and reviewer.
+     * --------------------------------------------------------
+     */
+
+    const insertResult =
+      await client.query(
+        `
+          INSERT INTO public.ecis_candidate_reviews (
             emergency_case_id,
             patient_id,
             reviewed_by,
             review_status,
             review_reason
-        )
-        VALUES ($1, $2, $3, $4, $5)
-        RETURNING
+          )
+          VALUES (
+            $1,
+            $2,
+            $3,
+            $4,
+            $5
+          )
+          RETURNING
             review_id,
             emergency_case_id,
             patient_id,
             reviewed_by,
             review_status,
             review_reason,
-            reviewed_at
+            reviewed_at;
         `,
-    [
-      emergencyCaseId,
-      patientId,
-      reviewedBy,
-      reviewStatus,
-      reviewReason ? reviewReason.trim() : null,
-    ],
-  );
+        [
+          emergencyCaseId,
+          patientId,
+          reviewedBy,
+          normalizedStatus,
+          reason,
+        ],
+      );
 
-  return {
-    review: insertResult.rows[0],
-    emergencyCase,
-    patient,
-    reviewer,
-  };
-};
+    await client.query(
+      "COMMIT",
+    );
 
-const getReviewsByEmergencyCase = async (emergencyCaseId) => {
-  const result = await pool.query(
-    `
+    return {
+      review:
+        insertResult.rows[0],
+
+      emergencyCase,
+
+      patient,
+
+      reviewer,
+    };
+  } catch (
+    error
+  ) {
+    await client.query(
+      "ROLLBACK",
+    );
+
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function getReviewsByEmergencyCase(
+  emergencyCaseIdValue,
+  hospitalIdValue,
+) {
+  const emergencyCaseId =
+    positiveInteger(
+      emergencyCaseIdValue,
+      "emergencyCaseId",
+    );
+
+  const hospitalId =
+    positiveInteger(
+      hospitalIdValue,
+      "hospitalId",
+    );
+
+  const result =
+    await pool.query(
+      `
         SELECT
-            r.review_id,
-            r.emergency_case_id,
-            r.patient_id,
+          r.review_id,
+          r.emergency_case_id,
+          r.patient_id,
 
-            p.patient_number,
-            p.first_name,
-            p.middle_name,
-            p.last_name,
+          p.patient_number,
+          p.first_name,
+          p.middle_name,
+          p.last_name,
 
-            r.reviewed_by,
-            u.full_name AS reviewer_name,
+          r.reviewed_by,
+          u.full_name AS reviewer_name,
 
-            r.review_status,
-            r.review_reason,
-            r.reviewed_at
+          r.review_status,
+          r.review_reason,
+          r.reviewed_at
 
         FROM public.ecis_candidate_reviews r
 
         INNER JOIN public.patients p
-            ON p.patient_id = r.patient_id
+          ON p.patient_id =
+             r.patient_id
 
         INNER JOIN public.hospital_users u
-            ON u.user_id = r.reviewed_by
+          ON u.user_id =
+             r.reviewed_by
 
-        WHERE r.emergency_case_id = $1
+        INNER JOIN public.emergency_cases ec
+          ON ec.emergency_case_id =
+             r.emergency_case_id
 
-        ORDER BY r.reviewed_at DESC
-        `,
-    [emergencyCaseId],
-  );
+        WHERE
+          r.emergency_case_id = $1
+          AND ec.hospital_id = $2
+          AND p.hospital_id = $2
+          AND u.hospital_id = $2
+
+        ORDER BY
+          r.reviewed_at DESC,
+          r.review_id DESC;
+      `,
+      [
+        emergencyCaseId,
+        hospitalId,
+      ],
+    );
 
   return result.rows;
-};
+}
 
-const getReviewById = async (reviewId) => {
-  const result = await pool.query(
-    `
+async function getReviewById(
+  reviewIdValue,
+  hospitalIdValue,
+) {
+  const reviewId =
+    positiveInteger(
+      reviewIdValue,
+      "reviewId",
+    );
+
+  const hospitalId =
+    positiveInteger(
+      hospitalIdValue,
+      "hospitalId",
+    );
+
+  const result =
+    await pool.query(
+      `
         SELECT
-            r.review_id,
-            r.emergency_case_id,
-            r.patient_id,
+          r.review_id,
+          r.emergency_case_id,
+          r.patient_id,
 
-            p.patient_number,
-            p.first_name,
-            p.middle_name,
-            p.last_name,
+          p.patient_number,
+          p.first_name,
+          p.middle_name,
+          p.last_name,
 
-            r.reviewed_by,
-            u.full_name AS reviewer_name,
+          r.reviewed_by,
+          u.full_name AS reviewer_name,
 
-            r.review_status,
-            r.review_reason,
-            r.reviewed_at
+          r.review_status,
+          r.review_reason,
+          r.reviewed_at
 
         FROM public.ecis_candidate_reviews r
 
         INNER JOIN public.patients p
-            ON p.patient_id = r.patient_id
+          ON p.patient_id =
+             r.patient_id
 
         INNER JOIN public.hospital_users u
-            ON u.user_id = r.reviewed_by
+          ON u.user_id =
+             r.reviewed_by
 
-        WHERE r.review_id = $1
-        `,
-    [reviewId],
+        INNER JOIN public.emergency_cases ec
+          ON ec.emergency_case_id =
+             r.emergency_case_id
+
+        WHERE
+          r.review_id = $1
+          AND ec.hospital_id = $2
+          AND p.hospital_id = $2
+          AND u.hospital_id = $2
+
+        LIMIT 1;
+      `,
+      [
+        reviewId,
+        hospitalId,
+      ],
+    );
+
+  return (
+    result.rows[0] ||
+    null
   );
-
-  return result.rows[0] || null;
-};
+}
 
 module.exports = {
   reviewCandidate,

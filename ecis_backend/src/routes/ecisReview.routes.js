@@ -14,15 +14,37 @@ const {
 
 const {
   authorizeRoles,
-} = require(
-  "../middleware/authorization.middleware",
-);
+} = require("../middleware/authorization.middleware");
+
 
 /*
- * Create candidate review.
+ * ============================================================
+ * ECIS CANDIDATE REVIEWS
+ * ============================================================
  *
- * DOCTOR can reject a candidate or request
- * additional evidence.
+ * Routes are mounted from app.js as:
+ *
+ * /api/ecis
+ *
+ * Therefore the final endpoints are:
+ *
+ * POST /api/ecis/reviews
+ * GET  /api/ecis/reviews/emergency/:emergencyCaseId
+ * GET  /api/ecis/reviews/:reviewId
+ *
+ * Authentication and doctor authorization are handled here.
+ */
+
+
+/*
+ * Create a candidate review.
+ *
+ * Allowed review decisions:
+ *   REJECTED
+ *   NEEDS_MORE_EVIDENCE
+ *
+ * Identity confirmation is intentionally handled
+ * by the separate ECIS confirmation workflow.
  */
 router.post(
   "/reviews",
@@ -31,8 +53,9 @@ router.post(
   createCandidateReview,
 );
 
+
 /*
- * Get reviews for an emergency case.
+ * Get all reviews belonging to an emergency case.
  */
 router.get(
   "/reviews/emergency/:emergencyCaseId",
@@ -41,8 +64,9 @@ router.get(
   getReviewsByEmergencyCase,
 );
 
+
 /*
- * Get a specific review.
+ * Get one review by review ID.
  */
 router.get(
   "/reviews/:reviewId",
@@ -50,5 +74,6 @@ router.get(
   authorizeRoles("DOCTOR"),
   getReviewById,
 );
+
 
 module.exports = router;
