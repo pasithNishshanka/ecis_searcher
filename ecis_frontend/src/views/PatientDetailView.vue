@@ -1311,6 +1311,7 @@ import { calculateAge } from "../utils/patient";
 
 import {
   computed,
+  h,
   reactive,
   ref,
 } from "vue";
@@ -1354,24 +1355,36 @@ import type {
 } from "../types";
 
 
-const Info = {
-  props: [
-    "l",
-    "v",
-  ],
-
-  template: `
-    <div class="rounded-xl bg-slate-50 p-3">
-      <p class="label">
-        {{ l }}
-      </p>
-
-      <p class="mt-1 text-sm font-bold">
-        {{ v || "—" }}
-      </p>
-    </div>
-  `,
-};
+const Info = (props: {
+  l?: string;
+  v?: unknown;
+}) =>
+  h(
+    "div",
+    {
+      class: "rounded-xl bg-slate-50 p-3",
+    },
+    [
+      h(
+        "p",
+        {
+          class: "label",
+        },
+        props.l || "",
+      ),
+      h(
+        "p",
+        {
+          class: "mt-1 text-sm font-bold",
+        },
+        props.v === null ||
+        props.v === undefined ||
+        props.v === ""
+          ? "—"
+          : String(props.v),
+      ),
+    ],
+  );
 
 
 const route =
