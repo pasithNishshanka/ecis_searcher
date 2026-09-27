@@ -726,6 +726,199 @@ async function searchPatients(
 
 
   /*
+   * Clinical evidence filters
+   *
+   * These must be SQL filters, not just client-side scoring hints.
+   * Applying them here means the candidate limit is reached only after
+   * unrelated patients have been excluded. Each entered clue is required
+   * to have matching longitudinal evidence for the patient.
+   */
+
+  if (
+    input.surgery
+  ) {
+    addFilter(
+      `
+        EXISTS (
+          SELECT 1
+          FROM public.surgeries s
+          WHERE
+            s.patient_id = p.patient_id
+            AND LOWER(
+              CONCAT_WS(
+                ' ',
+                s.surgery_name,
+                s.body_site,
+                s.preoperative_diagnosis,
+                s.postoperative_diagnosis
+              )
+            ) LIKE '%' || LOWER($VALUE) || '%'
+        )
+      `,
+      input.surgery,
+    );
+  }
+
+
+  if (
+    input.fracture
+  ) {
+    addFilter(
+      `
+        EXISTS (
+          SELECT 1
+          FROM public.fractures f
+          WHERE
+            f.patient_id = p.patient_id
+            AND LOWER(
+              CONCAT_WS(
+                ' ',
+                f.body_part,
+                f.fracture_type,
+                f.laterality
+              )
+            ) LIKE '%' || LOWER($VALUE) || '%'
+        )
+      `,
+      input.fracture,
+    );
+  }
+
+
+  if (
+    input.device
+  ) {
+    addFilter(
+      `
+        EXISTS (
+          SELECT 1
+          FROM public.medical_devices d
+          WHERE
+            d.patient_id = p.patient_id
+            AND LOWER(
+              CONCAT_WS(
+                ' ',
+                d.device_type,
+                d.device_name,
+                d.manufacturer,
+                d.model_number,
+                d.serial_number,
+                d.body_site
+              )
+            ) LIKE '%' || LOWER($VALUE) || '%'
+        )
+      `,
+      input.device,
+    );
+  }
+
+
+  if (
+    input.dental
+  ) {
+    addFilter(
+      `
+        EXISTS (
+          SELECT 1
+          FROM public.dental_records dr
+          WHERE
+            dr.patient_id = p.patient_id
+            AND LOWER(
+              CONCAT_WS(
+                ' ',
+                dr.condition,
+                dr.treatment,
+                dr.filling_type,
+                dr.tooth_number
+              )
+            ) LIKE '%' || LOWER($VALUE) || '%'
+        )
+      `,
+      input.dental,
+    );
+  }
+
+
+  if (
+    input.observation
+  ) {
+    addFilter(
+      `
+        EXISTS (
+          SELECT 1
+          FROM public.clinical_observations o
+          WHERE
+            o.patient_id = p.patient_id
+            AND LOWER(
+              CONCAT_WS(
+                ' ',
+                o.observation_type,
+                o.observation_value,
+                o.body_site,
+                o.laterality
+              )
+            ) LIKE '%' || LOWER($VALUE) || '%'
+        )
+      `,
+      input.observation,
+    );
+  }
+
+
+  if (
+    input.treatment
+  ) {
+    addFilter(
+      `
+        EXISTS (
+          SELECT 1
+          FROM public.treatment_records t
+          WHERE
+            t.patient_id = p.patient_id
+            AND LOWER(
+              CONCAT_WS(
+                ' ',
+                t.treatment_type,
+                t.treatment_name,
+                t.description,
+                t.body_site
+              )
+            ) LIKE '%' || LOWER($VALUE) || '%'
+        )
+      `,
+      input.treatment,
+    );
+  }
+
+
+  if (
+    input.investigation
+  ) {
+    addFilter(
+      `
+        EXISTS (
+          SELECT 1
+          FROM public.investigations i
+          WHERE
+            i.patient_id = p.patient_id
+            AND LOWER(
+              CONCAT_WS(
+                ' ',
+                i.investigation_type,
+                i.investigation_name,
+                i.result_summary,
+                i.result_value,
+                i.body_site
+              )
+            ) LIKE '%' || LOWER($VALUE) || '%'
+        )
+      `,
+      input.investigation,
+    );
+  }
+
+
+  /*
    * ----------------------------------------------------------
    * Candidate query
    * ----------------------------------------------------------

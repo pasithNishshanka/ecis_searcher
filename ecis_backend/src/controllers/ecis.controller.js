@@ -386,27 +386,15 @@ const searchECISCandidates = async (
 
 
     /*
-     * Remove emergencyCaseId and frontend-only aliases
-     * before passing the actual search criteria to the
-     * ECIS matching service.
+     * Remove only the request-routing field before normalizing.
+     *
+     * The remaining frontend aliases must stay available here so
+     * normalizeFrontendCriteria() can map partialName, phoneFragment,
+     * and the other UI field names to their database search filters.
      */
     const {
       emergencyCaseId:
         _ignored,
-      partialName:
-        _partialName,
-      phoneFragment:
-        _phoneFragment,
-      workplace:
-        _workplace,
-      previousSurgery:
-        _previousSurgery,
-      implantOrDevice:
-        _implantOrDevice,
-      dentalClue:
-        _dentalClue,
-      clinicalObservation:
-        _clinicalObservation,
       ...directCriteria
     } = criteria;
 
