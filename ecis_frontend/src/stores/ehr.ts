@@ -205,6 +205,10 @@ function mapPatient(
           )
         : 0,
 
+    allergyStatus:
+      row?.allergy_status ||
+      "UNKNOWN",
+
     phone:
       row?.primary_phone ??
       "",

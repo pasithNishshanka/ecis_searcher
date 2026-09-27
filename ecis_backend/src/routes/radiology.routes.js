@@ -8,6 +8,9 @@ const {
   createOrder,
   recordReport,
   verifyReport,
+  uploadOrderImages,
+  getOrderImages,
+  streamImage,
 } =
   require(
     "../controllers/radiology.controller",
@@ -15,6 +18,12 @@ const {
 
 const router =
   express.Router();
+
+const {
+  uploadRadiologyImages,
+} = require(
+  "../middleware/radiologyUpload.middleware",
+);
 
 router.get(
   "/patients/:patientId/encounters",
@@ -29,6 +38,22 @@ router.get(
 router.get(
   "/orders/:investigationId",
   getOrderById,
+);
+
+router.get(
+  "/orders/:investigationId/images",
+  getOrderImages,
+);
+
+router.post(
+  "/orders/:investigationId/images",
+  uploadRadiologyImages,
+  uploadOrderImages,
+);
+
+router.get(
+  "/images/:radiologyImageId/file",
+  streamImage,
 );
 
 router.post(

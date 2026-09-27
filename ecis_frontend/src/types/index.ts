@@ -19,6 +19,12 @@ export interface Patient {
 
   weightKg: number;
 
+  allergyStatus:
+    | "NO_KNOWN_ALLERGIES"
+    | "HAS_ALLERGIES"
+    | "UNKNOWN"
+    | string;
+
   phone: string;
 
   email: string;
@@ -73,7 +79,10 @@ export interface AdmissionRecord {
 
   dischargeSummary?: string | null;
 
-  status: "ADMITTED" | "DISCHARGED" | string;
+  status:
+    | "ADMITTED"
+    | "DISCHARGED"
+    | string;
 
   encounterId?: string | null;
 

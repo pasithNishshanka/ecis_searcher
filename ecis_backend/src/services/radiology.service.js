@@ -1,4 +1,12 @@
+const crypto = require("crypto");
+const fs = require("fs");
+const path = require("path");
+
 const pool = require("../config/database");
+
+const {
+  getStoragePath,
+} = require("../middleware/radiologyUpload.middleware");
 
 function positiveInteger(value, fieldName) {
   const number = Number(value);
@@ -130,6 +138,35 @@ const imagingOrderSelect = `
     i.priority,
     i.specimen_type,
     i.clinical_notes,
+
+    COALESCE(
+      (
+        SELECT jsonb_agg(
+          jsonb_build_object(
+            'imageId',
+            ri.radiology_image_id,
+            'fileName',
+            ri.original_filename,
+            'mimeType',
+            ri.mime_type,
+            'sizeBytes',
+            ri.size_bytes,
+            'uploadedAt',
+            ri.uploaded_at,
+            'uploadedByName',
+            image_user.full_name
+          )
+          ORDER BY ri.uploaded_at DESC
+        )
+        FROM public.radiology_images ri
+        LEFT JOIN public.hospital_users image_user
+          ON image_user.user_id = ri.uploaded_by
+        WHERE
+          ri.investigation_id = i.investigation_id
+          AND ri.is_active = TRUE
+      ),
+      '[]'::jsonb
+    ) AS images,
 
     p.patient_number,
     p.first_name,
@@ -893,6 +930,318 @@ async function verifyReport(
   }
 }
 
+function safeOriginalFilename(value) {
+  const filename = path.basename(
+    cleanString(value, 255),
+  )
+    .replace(
+      /[^a-zA-Z0-9._() -]/g,
+      "_",
+    )
+    .trim();
+
+  return filename || "radiology-image";
+}
+
+async function sha256File(filePath) {
+  const hash = crypto.createHash("sha256");
+  const stream = fs.createReadStream(filePath);
+
+  for await (const chunk of stream) {
+    hash.update(chunk);
+  }
+
+  return hash.digest("hex");
+}
+
+async function getOrderImages(
+  orderIdValue,
+  hospitalIdValue,
+) {
+  const orderId = positiveInteger(
+    orderIdValue,
+    "investigationId",
+  );
+
+  const hospitalId = positiveInteger(
+    hospitalIdValue,
+    "Authenticated hospital",
+  );
+
+  const result = await pool.query(
+    `
+      SELECT
+        ri.radiology_image_id,
+        ri.investigation_id,
+        ri.original_filename,
+        ri.mime_type,
+        ri.size_bytes,
+        ri.uploaded_at,
+        image_user.full_name AS uploaded_by_name
+      FROM public.radiology_images ri
+      INNER JOIN public.investigations i
+        ON i.investigation_id = ri.investigation_id
+      INNER JOIN public.patients p
+        ON p.patient_id = i.patient_id
+      LEFT JOIN public.hospital_users image_user
+        ON image_user.user_id = ri.uploaded_by
+      WHERE
+        ri.investigation_id = $1
+        AND ri.hospital_id = $2
+        AND p.hospital_id = $2
+        AND ri.is_active = TRUE
+        AND i.investigation_type = 'IMAGING'
+      ORDER BY
+        ri.uploaded_at DESC,
+        ri.radiology_image_id DESC;
+    `,
+    [
+      orderId,
+      hospitalId,
+    ],
+  );
+
+  return result.rows;
+}
+
+async function attachImages(
+  orderIdValue,
+  files,
+  authUser,
+) {
+  const orderId = positiveInteger(
+    orderIdValue,
+    "investigationId",
+  );
+
+  const hospitalId = positiveInteger(
+    authUser?.hospitalId,
+    "Authenticated hospital",
+  );
+
+  const uploadedBy = positiveInteger(
+    authUser?.userId,
+    "Authenticated user",
+  );
+
+  if (!Array.isArray(files) || !files.length) {
+    throw new Error("At least one radiology image is required.");
+  }
+
+  const preparedFiles = await Promise.all(
+    files.map(async (file) => {
+      if (
+        !file?.filename ||
+        path.basename(file.filename) !== file.filename
+      ) {
+        throw new Error("Invalid uploaded radiology image.");
+      }
+
+      const filePath = getStoragePath(
+        file.filename,
+      );
+
+      const details = await fs.promises.stat(filePath);
+
+      if (!details.isFile() || details.size <= 0) {
+        throw new Error("Uploaded radiology image is empty or unavailable.");
+      }
+
+      return {
+        storageKey: file.filename,
+        originalFilename: safeOriginalFilename(
+          file.originalname,
+        ),
+        mimeType: file.mimetype,
+        sizeBytes: details.size,
+        checksumSha256: await sha256File(filePath),
+      };
+    }),
+  );
+
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const orderResult = await client.query(
+      `
+        SELECT
+          i.investigation_id,
+          i.patient_id,
+          i.status
+        FROM public.investigations i
+        INNER JOIN public.patients p
+          ON p.patient_id = i.patient_id
+        WHERE
+          i.investigation_id = $1
+          AND p.hospital_id = $2
+          AND i.investigation_type = 'IMAGING'
+        FOR UPDATE OF i;
+      `,
+      [
+        orderId,
+        hospitalId,
+      ],
+    );
+
+    if (!orderResult.rowCount) {
+      throw new Error("Radiology order not found.");
+    }
+
+    if (orderResult.rows[0].status === "CANCELLED") {
+      throw new Error(
+        "A cancelled radiology order cannot receive images.",
+      );
+    }
+
+    await assertActiveUser(
+      client,
+      uploadedBy,
+      hospitalId,
+    );
+
+    const images = [];
+
+    for (const file of preparedFiles) {
+      const insertResult = await client.query(
+        `
+          INSERT INTO public.radiology_images (
+            investigation_id,
+            patient_id,
+            hospital_id,
+            storage_key,
+            original_filename,
+            mime_type,
+            size_bytes,
+            checksum_sha256,
+            uploaded_by
+          )
+          VALUES (
+            $1,
+            $2,
+            $3,
+            $4,
+            $5,
+            $6,
+            $7,
+            $8,
+            $9
+          )
+          RETURNING
+            radiology_image_id,
+            investigation_id,
+            original_filename,
+            mime_type,
+            size_bytes,
+            uploaded_at;
+        `,
+        [
+          orderId,
+          orderResult.rows[0].patient_id,
+          hospitalId,
+          file.storageKey,
+          file.originalFilename,
+          file.mimeType,
+          file.sizeBytes,
+          file.checksumSha256,
+          uploadedBy,
+        ],
+      );
+
+      images.push(
+        insertResult.rows[0],
+      );
+    }
+
+    await client.query("COMMIT");
+
+    return images;
+  } catch (error) {
+    await client.query("ROLLBACK");
+
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function getImageFile(
+  imageIdValue,
+  hospitalIdValue,
+) {
+  const imageId = positiveInteger(
+    imageIdValue,
+    "radiologyImageId",
+  );
+
+  const hospitalId = positiveInteger(
+    hospitalIdValue,
+    "Authenticated hospital",
+  );
+
+  const result = await pool.query(
+    `
+      SELECT
+        ri.radiology_image_id,
+        ri.storage_key,
+        ri.original_filename,
+        ri.mime_type,
+        ri.size_bytes
+      FROM public.radiology_images ri
+      INNER JOIN public.investigations i
+        ON i.investigation_id = ri.investigation_id
+      INNER JOIN public.patients p
+        ON p.patient_id = i.patient_id
+      WHERE
+        ri.radiology_image_id = $1
+        AND ri.hospital_id = $2
+        AND p.hospital_id = $2
+        AND ri.is_active = TRUE
+        AND i.investigation_type = 'IMAGING'
+      LIMIT 1;
+    `,
+    [
+      imageId,
+      hospitalId,
+    ],
+  );
+
+  return result.rows[0] || null;
+}
+
+async function recordImageAccess(
+  imageIdValue,
+  userIdValue,
+  action = "VIEW",
+) {
+  const imageId = positiveInteger(
+    imageIdValue,
+    "radiologyImageId",
+  );
+
+  const userId = positiveInteger(
+    userIdValue,
+    "Authenticated user",
+  );
+
+  await pool.query(
+    `
+      INSERT INTO public.radiology_image_access_logs (
+        radiology_image_id,
+        accessed_by,
+        access_action
+      )
+      VALUES ($1, $2, $3);
+    `,
+    [
+      imageId,
+      userId,
+      action,
+    ],
+  );
+}
+
 module.exports = {
   getPatientEncounters,
   getPatientOrders,
@@ -900,4 +1249,8 @@ module.exports = {
   createOrder,
   recordReport,
   verifyReport,
+  getOrderImages,
+  attachImages,
+  getImageFile,
+  recordImageAccess,
 };

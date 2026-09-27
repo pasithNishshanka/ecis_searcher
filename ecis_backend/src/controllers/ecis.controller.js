@@ -1,73 +1,369 @@
 const ecisService = require("../services/ecis.service");
 const pool = require("../config/database");
 
-const searchECISCandidates = async (req, res) => {
+
+/*
+ * ============================================================
+ * ECIS CONTROLLER
+ * ============================================================
+ *
+ * ECIS searches the existing longitudinal EHR and returns
+ * candidate patients for authorized human review.
+ *
+ * Important:
+ * - ECIS does not create a second patient database.
+ * - ECIS does not automatically confirm identity.
+ * - The returned score is an explainable heuristic score,
+ *   not a medically validated probability.
+ */
+
+
+/*
+ * ------------------------------------------------------------
+ * FRONTEND -> SERVICE CRITERIA MAPPING
+ * ------------------------------------------------------------
+ *
+ * The ECIS frontend uses descriptive field names while the
+ * service uses shorter normalized names internally.
+ */
+function normalizeFrontendCriteria(criteria) {
+  return {
+    ...criteria,
+
+    /* Demographic / direct fields */
+    name:
+      criteria.name ??
+      criteria.partialName,
+
+    phone:
+      criteria.phone ??
+      criteria.phoneFragment,
+
+    occupation:
+      criteria.occupation ??
+      criteria.workplace,
+
+    /* Longitudinal clinical evidence fields */
+    surgery:
+      criteria.surgery ??
+      criteria.previousSurgery,
+
+    device:
+      criteria.device ??
+      criteria.implantOrDevice,
+
+    dental:
+      criteria.dental ??
+      criteria.dentalClue,
+
+    observation:
+      criteria.observation ??
+      criteria.clinicalObservation,
+  };
+}
+
+
+/*
+ * ------------------------------------------------------------
+ * EVIDENCE SOURCE TABLE LABELS
+ * ------------------------------------------------------------
+ */
+const evidenceSourceTables = {
+  gender: "patients",
+  bloodGroup: "patients",
+  age: "patients",
+  height: "patients",
+  weight: "patients",
+  name: "patients",
+  phone: "patients",
+  occupation: "patients",
+  surgery: "surgeries",
+  fracture: "fractures",
+  device: "medical_devices",
+  dental: "dental_records",
+  observation: "clinical_observations",
+  treatment: "treatment_records",
+  investigation: "investigations",
+};
+
+
+function mapEvidence(evidence) {
+  return (evidence || []).map((item) => ({
+    type:
+      item.label ||
+      item.key ||
+      "Evidence",
+
+    description:
+      item.details ||
+      item.label ||
+      "Matching clinical evidence",
+
+    sourceTable:
+      evidenceSourceTables[item.key] ||
+      "patients",
+
+    /* Keep the original explainability information too. */
+    key:
+      item.key ||
+      null,
+
+    score:
+      Number.isFinite(
+        Number(item.score),
+      )
+        ? Number(item.score)
+        : 0,
+  }));
+}
+
+
+function mapCandidate(candidate) {
+  const patient =
+    candidate?.patient ||
+    {};
+
+  const fullName = [
+    patient.firstName,
+    patient.middleName,
+    patient.lastName,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+
+  return {
+    patientId:
+      patient.patientId ??
+      null,
+
+    hospitalId:
+      patient.hospitalId ??
+      null,
+
+    patientNumber:
+      patient.patientNumber ??
+      null,
+
+    name:
+      fullName ||
+      "Unknown patient",
+
+    firstName:
+      patient.firstName ??
+      null,
+
+    middleName:
+      patient.middleName ??
+      null,
+
+    lastName:
+      patient.lastName ??
+      null,
+
+    dateOfBirth:
+      patient.dateOfBirth ??
+      null,
+
+    age:
+      patient.age ??
+      null,
+
+    gender:
+      patient.gender ??
+      null,
+
+    bloodGroup:
+      patient.bloodGroup ??
+      null,
+
+    heightCm:
+      patient.heightCm ??
+      null,
+
+    weightKg:
+      patient.weightKg ??
+      null,
+
+    primaryPhone:
+      patient.primaryPhone ??
+      null,
+
+    occupation:
+      patient.occupation ??
+      null,
+
+    nationality:
+      patient.nationality ??
+      null,
+
+    district:
+      patient.district ??
+      null,
+
+    province:
+      patient.province ??
+      null,
+
+    score:
+      Number.isFinite(
+        Number(
+          candidate?.normalizedScore,
+        ),
+      )
+        ? Number(
+            candidate.normalizedScore,
+          )
+        : 0,
+
+    rawScore:
+      Number.isFinite(
+        Number(
+          candidate?.score,
+        ),
+      )
+        ? Number(
+            candidate.score,
+          )
+        : 0,
+
+    evidence:
+      mapEvidence(
+        candidate?.evidence,
+      ),
+
+    sourceCounts:
+      candidate?.sourceCounts ||
+      {},
+  };
+}
+
+
+/*
+ * ============================================================
+ * POST /api/ecis/search
+ * ============================================================
+ */
+const searchECISCandidates = async (
+  req,
+  res,
+) => {
   try {
-    const criteria = req.body || {};
+    const criteria =
+      req.body ||
+      {};
 
     if (!req.user) {
       return res.status(401).json({
         success: false,
-        message: "Authenticated user information is required",
+        message:
+          "Authenticated user information is required",
       });
     }
 
+
+    const hospitalId =
+      Number(
+        req.user.hospitalId,
+      );
+
+    if (
+      !Number.isInteger(
+        hospitalId,
+      ) ||
+      hospitalId <= 0
+    ) {
+      return res.status(401).json({
+        success: false,
+        message:
+          "Authenticated hospital information is required",
+      });
+    }
+
+
     /*
-     * Emergency case is OPTIONAL.
+     * Emergency case is optional.
      *
      * ECIS can search the existing EHR directly.
-     * When an emergency case is supplied, we validate it
-     * and attach the search log to that case.
+     * When emergencyCaseId is supplied, the search is linked
+     * to that unidentified emergency case and audited.
      */
-
     const emergencyCaseId =
-      criteria.emergencyCaseId !== undefined &&
-      criteria.emergencyCaseId !== null &&
-      criteria.emergencyCaseId !== ""
-        ? Number(criteria.emergencyCaseId)
+      criteria.emergencyCaseId !==
+        undefined &&
+      criteria.emergencyCaseId !==
+        null &&
+      criteria.emergencyCaseId !==
+        ""
+        ? Number(
+            criteria.emergencyCaseId,
+          )
         : null;
 
-    let emergencyCase = null;
+    let emergencyCase =
+      null;
 
-    if (emergencyCaseId !== null) {
+
+    if (
+      emergencyCaseId !==
+      null
+    ) {
       if (
-        !Number.isInteger(emergencyCaseId) ||
+        !Number.isInteger(
+          emergencyCaseId,
+        ) ||
         emergencyCaseId <= 0
       ) {
         return res.status(400).json({
           success: false,
-          message: "emergencyCaseId must be a valid positive number",
+          message:
+            "emergencyCaseId must be a valid positive number",
         });
       }
 
-      const emergencyCaseResult = await pool.query(
-        `
-          SELECT
-            emergency_case_id,
-            hospital_id,
-            patient_id,
-            case_number,
-            unidentified_patient,
-            status
-          FROM public.emergency_cases
-          WHERE emergency_case_id = $1
-          LIMIT 1;
-        `,
-        [emergencyCaseId],
-      );
 
-      if (emergencyCaseResult.rows.length === 0) {
-        return res.status(404).json({
-          success: false,
-          message: "Emergency case not found",
-        });
-      }
+      const emergencyCaseResult =
+        await pool.query(
+          `
+            SELECT
+              emergency_case_id,
+              hospital_id,
+              patient_id,
+              case_number,
+              unidentified_patient,
+              status
+            FROM public.emergency_cases
+            WHERE emergency_case_id = $1
+            LIMIT 1;
+          `,
+          [
+            emergencyCaseId,
+          ],
+        );
 
-      emergencyCase = emergencyCaseResult.rows[0];
 
       if (
-        Number(emergencyCase.hospital_id) !==
-        Number(req.user.hospitalId)
+        emergencyCaseResult
+          .rows
+          .length === 0
+      ) {
+        return res.status(404).json({
+          success: false,
+          message:
+            "Emergency case not found",
+        });
+      }
+
+
+      emergencyCase =
+        emergencyCaseResult.rows[0];
+
+
+      if (
+        Number(
+          emergencyCase.hospital_id,
+        ) !==
+        hospitalId
       ) {
         return res.status(403).json({
           success: false,
@@ -76,7 +372,10 @@ const searchECISCandidates = async (req, res) => {
         });
       }
 
-      if (!emergencyCase.unidentified_patient) {
+
+      if (
+        !emergencyCase.unidentified_patient
+      ) {
         return res.status(400).json({
           success: false,
           message:
@@ -85,26 +384,95 @@ const searchECISCandidates = async (req, res) => {
       }
     }
 
+
     /*
-     * Remove emergencyCaseId before passing criteria
-     * to the matching engine.
+     * Remove emergencyCaseId and frontend-only aliases
+     * before passing the actual search criteria to the
+     * ECIS matching service.
      */
     const {
-      emergencyCaseId: _ignored,
-      ...searchCriteria
+      emergencyCaseId:
+        _ignored,
+      partialName:
+        _partialName,
+      phoneFragment:
+        _phoneFragment,
+      workplace:
+        _workplace,
+      previousSurgery:
+        _previousSurgery,
+      implantOrDevice:
+        _implantOrDevice,
+      dentalClue:
+        _dentalClue,
+      clinicalObservation:
+        _clinicalObservation,
+      ...directCriteria
     } = criteria;
 
-    const candidates =
-      await ecisService.searchCandidates(
-        searchCriteria,
-        req.user.hospitalId,
+
+    const serviceCriteria =
+      normalizeFrontendCriteria(
+        directCriteria,
       );
 
+
     /*
-     * Search is always audited.
+     * The current ecis.service.js exports searchPatients().
+     */
+    if (
+      typeof
+        ecisService.searchPatients !==
+      "function"
+    ) {
+      throw new Error(
+        "ECIS service searchPatients() is not available",
+      );
+    }
+
+
+    const serviceResult =
+      await ecisService.searchPatients(
+        serviceCriteria,
+        hospitalId,
+      );
+
+
+    /*
+     * Current service returns:
      *
-     * emergency_case_id may be NULL when ECIS is being
-     * used as a standalone EHR search.
+     * {
+     *   searchCriteria,
+     *   weightModel,
+     *   count,
+     *   candidates
+     * }
+     *
+     * Keep the controller compatible with that structure.
+     */
+    const rawCandidates =
+      Array.isArray(
+        serviceResult,
+      )
+        ? serviceResult
+        : Array.isArray(
+            serviceResult?.candidates,
+          )
+          ? serviceResult.candidates
+          : [];
+
+
+    const candidates =
+      rawCandidates.map(
+        mapCandidate,
+      );
+
+
+    /*
+     * Search is audited.
+     *
+     * emergency_case_id may be NULL for a standalone
+     * EHR search.
      */
     await pool.query(
       `
@@ -119,42 +487,78 @@ const searchECISCandidates = async (req, res) => {
       [
         emergencyCaseId,
         req.user.userId,
-        JSON.stringify(searchCriteria),
+        JSON.stringify(
+          serviceCriteria,
+        ),
         candidates.length,
       ],
     );
 
+
     return res.status(200).json({
       success: true,
+
       message:
         "ECIS candidate search completed successfully",
 
-      emergencyCase: emergencyCase
-        ? {
-            emergencyCaseId:
-              emergencyCase.emergency_case_id,
-            caseNumber:
-              emergencyCase.case_number,
-            hospitalId:
-              emergencyCase.hospital_id,
-            status:
-              emergencyCase.status,
-          }
-        : null,
+      emergencyCase:
+        emergencyCase
+          ? {
+              emergencyCaseId:
+                emergencyCase
+                  .emergency_case_id,
 
-      resultCount: candidates.length,
+              caseNumber:
+                emergencyCase
+                  .case_number,
+
+              hospitalId:
+                emergencyCase
+                  .hospital_id,
+
+              patientId:
+                emergencyCase
+                  .patient_id,
+
+              status:
+                emergencyCase
+                  .status,
+
+              unidentifiedPatient:
+                emergencyCase
+                  .unidentified_patient,
+            }
+          : null,
+
+      resultCount:
+        candidates.length,
+
+      weightModel:
+        serviceResult?.weightModel ||
+        null,
+
       candidates,
     });
   } catch (error) {
-    console.error("ECIS search error:", error);
+    console.error(
+      "ECIS search error:",
+      error,
+    );
 
     return res.status(500).json({
       success: false,
-      message: "Failed to perform ECIS candidate search",
-      error: error.message,
+
+      message:
+        "Failed to perform ECIS candidate search",
+
+      error:
+        error instanceof Error
+          ? error.message
+          : "Unknown ECIS search error",
     });
   }
 };
+
 
 module.exports = {
   searchECISCandidates,

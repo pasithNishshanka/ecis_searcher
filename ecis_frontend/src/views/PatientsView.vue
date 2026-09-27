@@ -1,10 +1,13 @@
 <template>
   <div>
-    <PageHeader eyebrow="Patient registry" title="Patients"
-      description="Register each patient once and maintain the same permanent EHR throughout their care.">
-      <BaseButton @click="
-        openRegister = true
-        ">
+    <PageHeader
+      eyebrow="Patient registry"
+      title="Patients"
+      description="Register each patient once and maintain the same permanent EHR throughout their care."
+    >
+      <BaseButton
+        @click="openRegisterModal"
+      >
         <template #icon>
           <UserPlus :size="16" />
         </template>
@@ -14,13 +17,20 @@
     </PageHeader>
 
 
-    <!-- SEARCH -->
+    <!-- ======================================================
+         SEARCH
+         ====================================================== -->
 
     <section class="card p-5">
       <div class="grid gap-3 md:grid-cols-[1fr_180px]">
-        <BaseInput v-model="search" placeholder="Search name / Patient ID / NIC / phone" />
+        <BaseInput
+          v-model="search"
+          placeholder="Search name / Patient ID / NIC / phone"
+        />
 
-        <BaseSelect v-model="genderFilter">
+        <BaseSelect
+          v-model="genderFilter"
+        >
           <option value="">
             All gender
           </option>
@@ -41,11 +51,15 @@
     </section>
 
 
-    <!-- PATIENT TABLE -->
+    <!-- ======================================================
+         PATIENT TABLE
+         ====================================================== -->
 
     <section class="card mt-6 overflow-hidden">
       <div class="border-b p-5">
-        <div class="flex items-center justify-between">
+        <div
+          class="flex items-center justify-between"
+        >
           <div>
             <h2 class="section-title">
               Registered patients
@@ -64,27 +78,39 @@
         <table class="min-w-full">
           <thead class="bg-slate-50">
             <tr>
-              <th class="px-5 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
+              <th
+                class="px-5 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500"
+              >
                 Patient
               </th>
 
-              <th class="px-5 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
+              <th
+                class="px-5 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500"
+              >
                 DOB
               </th>
 
-              <th class="px-5 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
+              <th
+                class="px-5 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500"
+              >
                 Age
               </th>
 
-              <th class="px-5 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
+              <th
+                class="px-5 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500"
+              >
                 Blood
               </th>
 
-              <th class="px-5 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
+              <th
+                class="px-5 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500"
+              >
                 Location
               </th>
 
-              <th class="px-5 py-3 text-right text-xs font-bold uppercase tracking-wide text-slate-500">
+              <th
+                class="px-5 py-3 text-right text-xs font-bold uppercase tracking-wide text-slate-500"
+              >
                 Actions
               </th>
             </tr>
@@ -92,25 +118,22 @@
 
 
           <tbody class="divide-y divide-slate-100">
-            <tr v-for="
-patient in filtered
-              " :key="patient.id
-                " class="hover:bg-slate-50">
+            <tr
+              v-for="patient in filtered"
+              :key="patient.id"
+              class="hover:bg-slate-50"
+            >
               <td class="px-5 py-4">
-                <div class="flex items-center gap-3">
+                <div
+                  class="flex items-center gap-3"
+                >
                   <div class="avatar">
                     {{
-                      patient
-                        .firstName
-                        ?.charAt(
-                          0,
-                        ) || ""
+                      patient.firstName
+                        ?.charAt(0) || ""
                     }}{{
-                      patient
-                        .lastName
-                        ?.charAt(
-                          0,
-                        ) || ""
+                      patient.lastName
+                        ?.charAt(0) || ""
                     }}
                   </div>
 
@@ -125,18 +148,18 @@ patient in filtered
                       }}
                     </p>
 
-                    <p class="text-xs text-slate-400">
+                    <p
+                      class="text-xs text-slate-400"
+                    >
                       {{
                         patient.patientNumber
                       }}
 
-                      <span v-if="
-                        patient.nic
-                      ">
+                      <span
+                        v-if="patient.nic"
+                      >
                         ·
-                        {{
-                          patient.nic
-                        }}
+                        {{ patient.nic }}
                       </span>
                     </p>
                   </div>
@@ -144,17 +167,31 @@ patient in filtered
               </td>
 
 
-              <td class="px-5 py-4 text-sm">
-                {{ formatDate(patient.dateOfBirth) }}
+              <td
+                class="px-5 py-4 text-sm"
+              >
+                {{
+                  formatDate(
+                    patient.dateOfBirth,
+                  )
+                }}
               </td>
 
 
-              <td class="px-5 py-4 text-sm font-bold">
-                {{ calculateAge(patient.dateOfBirth) ?? "—" }}
+              <td
+                class="px-5 py-4 text-sm font-bold"
+              >
+                {{
+                  calculateAge(
+                    patient.dateOfBirth,
+                  ) ?? "—"
+                }}
               </td>
 
 
-              <td class="px-5 py-4 text-sm font-bold">
+              <td
+                class="px-5 py-4 text-sm font-bold"
+              >
                 {{
                   patient.bloodGroup ||
                   "—"
@@ -162,26 +199,40 @@ patient in filtered
               </td>
 
 
-              <td class="px-5 py-4 text-sm">
-                {{ formatLocation(patient) }}
+              <td
+                class="px-5 py-4 text-sm"
+              >
+                {{
+                  formatLocation(
+                    patient,
+                  )
+                }}
               </td>
 
 
               <td class="px-5 py-4">
-                <div class="flex justify-end gap-2">
-                  <RouterLink :to="`/patients/${patient.id}`
-                    ">
-                    <BaseButton variant="secondary" size="sm">
+                <div
+                  class="flex justify-end gap-2"
+                >
+                  <RouterLink
+                    :to="`/patients/${patient.id}`"
+                  >
+                    <BaseButton
+                      variant="secondary"
+                      size="sm"
+                    >
                       Open EHR
                     </BaseButton>
                   </RouterLink>
 
 
-                  <BaseButton variant="ghost" size="sm" @click="
-                    startEdit(
-                      patient,
-                    )
-                    ">
+                  <BaseButton
+                    variant="ghost"
+                    size="sm"
+                    @click="
+                      startEdit(patient)
+                    "
+                  >
                     Edit
                   </BaseButton>
                 </div>
@@ -189,10 +240,13 @@ patient in filtered
             </tr>
 
 
-            <tr v-if="
-              !filtered.length
-            ">
-              <td colspan="6" class="p-12 text-center text-sm text-slate-400">
+            <tr
+              v-if="!filtered.length"
+            >
+              <td
+                colspan="6"
+                class="p-12 text-center text-sm text-slate-400"
+              >
                 {{
                   loading
                     ? "Loading registered patients..."
@@ -206,66 +260,135 @@ patient in filtered
     </section>
 
 
-    <!-- REGISTER / EDIT MODAL -->
+    <!-- ======================================================
+         TOAST
+         ====================================================== -->
 
-    <Modal :open="openRegister ||
-      openEdit
-      " :title="editing
-        ? 'Edit patient'
-        : 'Register new patient'
-        " :description="editing
+    <AppToast
+      :visible="toast.visible"
+      :title="toast.title"
+      :message="toast.message"
+      :type="toast.type"
+      @close="
+        toast.visible = false
+      "
+    />
+
+
+    <!-- ======================================================
+         REGISTER / EDIT MODAL
+         ====================================================== -->
+
+    <Modal
+      :open="
+        openRegister ||
+        openEdit
+      "
+      :title="
+        editing
+          ? 'Edit patient'
+          : 'Register new patient'
+      "
+      :description="
+        editing
           ? 'Update the existing permanent patient EHR.'
           : 'Create the permanent patient record. Later clinical records remain linked to this patient.'
-          " @close="
-            closeModal
-          ">
-      <form class="space-y-5" @submit.prevent="
-        savePatient
-      ">
-        <!-- BASIC -->
+      "
+      @close="closeModal"
+    >
+      <form
+        class="space-y-5"
+        @submit.prevent="savePatient"
+      >
+        <!-- ==================================================
+             BASIC INFORMATION
+             ================================================== -->
 
-        <div class="grid gap-4 sm:grid-cols-2">
-          <FormField label="First name" required>
-            <BaseInput v-model="form.firstName
-              " required />
+        <div
+          class="grid gap-4 sm:grid-cols-2"
+        >
+          <FormField
+            label="First name"
+            required
+          >
+            <BaseInput
+              v-model="form.firstName"
+              required
+            />
           </FormField>
 
 
-          <FormField label="Last name" required>
-            <BaseInput v-model="form.lastName
-              " required />
+          <FormField
+            label="Last name"
+            required
+          >
+            <BaseInput
+              v-model="form.lastName"
+              required
+            />
           </FormField>
 
 
           <FormField label="NIC">
-            <BaseInput v-model="form.nic
-              " />
+            <BaseInput
+              v-model="form.nic"
+            />
           </FormField>
 
 
-          <FormField label="Date of birth" required>
-            <BaseInput v-model="form.dateOfBirth" type="date" :max="todayDateInputValue()" required />
+          <FormField
+            label="Date of birth"
+            required
+          >
+            <BaseInput
+              v-model="form.dateOfBirth"
+              type="date"
+              :max="
+                todayDateInputValue()
+              "
+              required
+            />
           </FormField>
 
 
           <FormField label="Age">
-            <BaseInput :model-value="currentAge == null ? '' : String(currentAge)" readonly
-              :placeholder="form.dateOfBirth ? 'Calculated automatically' : 'Enter date of birth'" />
+            <BaseInput
+              :model-value="
+                currentAge == null
+                  ? ''
+                  : String(currentAge)
+              "
+              readonly
+              :placeholder="
+                form.dateOfBirth
+                  ? 'Calculated automatically'
+                  : 'Enter date of birth'
+              "
+            />
           </FormField>
 
 
-          <FormField label="Gender">
-            <BaseSelect v-model="form.gender
-              ">
-              <option>
+          <FormField
+            label="Gender"
+            required
+          >
+            <BaseSelect
+              v-model="form.gender"
+              required
+            >
+              <option value="">
+                Select gender
+              </option>
+
+              <option value="Male">
                 Male
               </option>
 
-              <option>
+              <option value="Female">
                 Female
               </option>
 
-              <option>
+              <option value="Other">
                 Other
               </option>
             </BaseSelect>
@@ -273,13 +396,18 @@ patient in filtered
 
 
           <FormField label="Blood group">
-            <BaseSelect v-model="form.bloodGroup
-              ">
-              <option v-for="
-group in bloodGroups
-                " :key="group
-                  " :value="group
-                    ">
+            <BaseSelect
+              v-model="form.bloodGroup"
+            >
+              <option value="">
+                Select blood group
+              </option>
+
+              <option
+                v-for="group in bloodGroups"
+                :key="group"
+                :value="group"
+              >
                 {{ group }}
               </option>
             </BaseSelect>
@@ -287,103 +415,276 @@ group in bloodGroups
 
 
           <FormField label="Height (cm)">
-            <BaseInput v-model.number="form.heightCm
-              " type="number" min="1" />
+            <BaseInput
+              v-model.number="
+                form.heightCm
+              "
+              type="number"
+              min="1"
+              max="300"
+            />
           </FormField>
 
 
           <FormField label="Weight (kg)">
-            <BaseInput v-model.number="form.weightKg
-              " type="number" min="1" />
+            <BaseInput
+              v-model.number="
+                form.weightKg
+              "
+              type="number"
+              min="1"
+              max="500"
+            />
           </FormField>
         </div>
 
 
-        <!-- CONTACT -->
+        <!-- ==================================================
+             CONTACT / LOCATION
+             ================================================== -->
 
-        <div class="grid gap-4 sm:grid-cols-2">
+        <div
+          class="grid gap-4 sm:grid-cols-2"
+        >
           <FormField label="Phone">
-            <BaseInput v-model="form.phone
-              " />
+            <BaseInput
+              v-model="form.phone"
+            />
           </FormField>
 
 
           <FormField label="Email">
-            <BaseInput v-model="form.email
-              " type="email" />
+            <BaseInput
+              v-model="form.email"
+              type="email"
+            />
           </FormField>
 
 
-          <FormField label="Province">
-            <BaseInput v-model="form.province
-              " />
+          <FormField
+            label="Province"
+            required
+          >
+            <BaseSelect
+              v-model="form.province"
+              required
+              @change="
+                handleProvinceChange
+              "
+            >
+              <option value="">
+                Select province
+              </option>
+
+              <option
+                v-for="
+                  province in SRI_LANKAN_PROVINCES
+                "
+                :key="province"
+                :value="province"
+              >
+                {{ province }}
+              </option>
+            </BaseSelect>
           </FormField>
 
 
-          <FormField label="District">
-            <BaseInput v-model="form.district
-              " />
+          <FormField
+            label="District"
+            required
+          >
+            <BaseSelect
+              v-model="form.district"
+              :disabled="!form.province"
+              required
+            >
+              <option value="">
+                Select district
+              </option>
+
+              <option
+                v-for="
+                  district in availableDistricts
+                "
+                :key="district"
+                :value="district"
+              >
+                {{ district }}
+              </option>
+            </BaseSelect>
           </FormField>
 
 
           <FormField label="Workplace">
-            <BaseInput v-model="form.workplace
-              " />
+            <BaseInput
+              v-model="form.workplace"
+            />
           </FormField>
 
 
           <div class="sm:col-span-2">
             <FormField label="Address">
-              <BaseTextarea v-model="form.address
-                " />
+              <BaseTextarea
+                v-model="form.address"
+              />
             </FormField>
           </div>
         </div>
 
 
-        <!-- ALLERGIES -->
+        <!-- ==================================================
+             ALLERGY INFORMATION
+             ================================================== -->
 
-        <div class="rounded-2xl border border-amber-200 bg-amber-50 p-5">
-          <h3 class="font-bold text-amber-900">
-            Allergy information
-          </h3>
+        <div
+          class="rounded-2xl border border-amber-200 bg-amber-50 p-5"
+        >
+          <div
+            class="flex items-start justify-between gap-3"
+          >
+            <div>
+              <h3
+                class="font-bold text-amber-900"
+              >
+                Allergy information
+              </h3>
+
+              <p
+                class="mt-1 text-xs text-amber-800"
+              >
+                Allergy assessment is required
+                for a complete patient record.
+              </p>
+            </div>
+
+            <span
+              class="text-xs font-black uppercase tracking-wide text-amber-700"
+            >
+              Required
+            </span>
+          </div>
 
 
-          <div class="mt-4 grid gap-5 sm:grid-cols-2">
-            <TagInput v-model="form.foodAllergies
-              " label="Food allergies" placeholder="e.g. peanuts, seafood, milk" />
+          <div class="mt-4">
+            <FormField
+              label="Allergy status"
+              required
+            >
+              <BaseSelect
+                v-model="
+                  form.allergyStatus
+                "
+                required
+                @change="
+                  handleAllergyStatusChange
+                "
+              >
+                <option value="">
+                  Select allergy status
+                </option>
+
+                <option
+                  value="NO_KNOWN_ALLERGIES"
+                >
+                  No known allergies
+                </option>
+
+                <option
+                  value="HAS_ALLERGIES"
+                >
+                  Has allergies
+                </option>
+
+                <option value="UNKNOWN">
+                  Unknown / unable to determine
+                </option>
+              </BaseSelect>
+            </FormField>
+          </div>
 
 
-            <TagInput v-model="form.medicalAllergies
-              " label="Medical / drug allergies" placeholder="e.g. penicillin, aspirin" />
+          <div
+            v-if="
+              form.allergyStatus ===
+              'HAS_ALLERGIES'
+            "
+            class="mt-4 rounded-xl border border-amber-200 bg-white p-3 text-xs text-amber-800"
+          >
+            Add at least one food allergy
+            or medical / drug allergy.
+          </div>
+
+
+          <div
+            v-if="
+              form.allergyStatus ===
+              'HAS_ALLERGIES'
+            "
+            class="mt-4 grid gap-5 sm:grid-cols-2"
+          >
+            <TagInput
+              v-model="
+                form.foodAllergies
+              "
+              label="Food allergies"
+              placeholder="e.g. peanuts, seafood, milk"
+            />
+
+
+            <TagInput
+              v-model="
+                form.medicalAllergies
+              "
+              label="Medical / drug allergies"
+              placeholder="e.g. penicillin, aspirin"
+            />
           </div>
         </div>
 
 
-        <!-- NOTES -->
+        <!-- ==================================================
+             NOTES
+             ================================================== -->
 
-        <FormField label="Registration notes">
-          <BaseTextarea v-model="form.registrationNotes
-            " placeholder="Add relevant registration notes..." />
+        <FormField
+          label="Registration notes"
+        >
+          <BaseTextarea
+            v-model="
+              form.registrationNotes
+            "
+            placeholder="Add relevant registration notes..."
+          />
         </FormField>
 
 
-        <div v-if="error" class="rounded-xl bg-red-50 p-4 text-sm text-red-700">
+        <!-- ERROR -->
+        <div
+          v-if="error"
+          class="rounded-xl bg-red-50 p-4 text-sm text-red-700"
+        >
           {{ error }}
         </div>
 
 
-        <div class="flex justify-end gap-2 border-t pt-4">
-          <BaseButton type="button" variant="secondary" :disabled="saving
-            " @click="
-              closeModal
-            ">
+        <!-- ACTIONS -->
+        <div
+          class="flex justify-end gap-2 border-t pt-4"
+        >
+          <BaseButton
+            type="button"
+            variant="secondary"
+            :disabled="saving"
+            @click="closeModal"
+          >
             Cancel
           </BaseButton>
 
 
-          <BaseButton type="submit" :disabled="saving
-            ">
+          <BaseButton
+            type="submit"
+            :disabled="saving"
+          >
             {{
               saving
                 ? "Saving..."
@@ -414,38 +715,32 @@ import {
   UserPlus,
 } from "lucide-vue-next";
 
-
 import PageHeader
   from "../components/PageHeader.vue";
-
 
 import Modal
   from "../components/Modal.vue";
 
-
 import TagInput
   from "../components/TagInput.vue";
 
+import AppToast
+  from "../components/ui/AppToast.vue";
 
 import BaseButton
   from "../components/ui/BaseButton.vue";
 
-
 import BaseInput
   from "../components/ui/BaseInput.vue";
-
 
 import BaseSelect
   from "../components/ui/BaseSelect.vue";
 
-
 import BaseTextarea
   from "../components/ui/BaseTextarea.vue";
 
-
 import FormField
   from "../components/forms/FormField.vue";
-
 
 import {
   useEHR,
@@ -459,78 +754,106 @@ import {
   todayDateInputValue,
 } from "../utils/patient";
 
+import {
+  SRI_LANKA_LOCATIONS,
+  SRI_LANKAN_PROVINCES,
+} from "../utils/sriLankaLocations";
+
 
 const {
   patients,
   loading,
   addPatient,
   updatePatient,
-} =
-  useEHR();
+} = useEHR();
 
 
 const search =
   ref("");
 
-
 const genderFilter =
   ref("");
-
 
 const openRegister =
   ref(false);
 
-
 const openEdit =
   ref(false);
-
 
 const editing =
   ref(false);
 
-
 const editingId =
   ref("");
 
-
 const saving =
   ref(false);
-
 
 const error =
   ref("");
 
 
-const bloodGroups =
-  [
-    "O+",
-    "O-",
-    "A+",
-    "A-",
-    "B+",
-    "B-",
-    "AB+",
-    "AB-",
-  ];
+/*
+ * ============================================================
+ * TOAST STATE
+ * ============================================================
+ */
 
+const toast = reactive({
+  visible: false,
+
+  title: "",
+
+  message: "",
+
+  type:
+    "success" as
+      | "success"
+      | "error",
+});
+
+
+/*
+ * ============================================================
+ * CONSTANTS
+ * ============================================================
+ */
+
+const bloodGroups = [
+  "O+",
+  "O-",
+  "A+",
+  "A-",
+  "B+",
+  "B-",
+  "AB+",
+  "AB-",
+];
+
+
+/*
+ * ============================================================
+ * FORM
+ * ============================================================
+ */
 
 const form =
   reactive<any>({
     firstName: "",
+
     lastName: "",
 
     nic: "",
 
     dateOfBirth: "",
 
-    gender: "Male",
+    gender: "",
 
-    bloodGroup:
-      "O+",
+    bloodGroup: "",
 
-    heightCm: 170,
+    heightCm: "",
 
-    weightKg: 70,
+    weightKg: "",
 
     phone: "",
 
@@ -538,24 +861,43 @@ const form =
 
     address: "",
 
-    province:
-      "Western Province",
+    province: "",
 
-    district:
-      "Colombo",
+    district: "",
 
     workplace: "",
 
-    foodAllergies:
-      [],
+    allergyStatus: "",
 
-    medicalAllergies:
-      [],
+    foodAllergies: [],
 
-    registrationNotes:
-      "",
+    medicalAllergies: [],
+
+    registrationNotes: "",
   });
 
+
+/*
+ * ============================================================
+ * LOCATION
+ * ============================================================
+ */
+
+const availableDistricts =
+  computed(() =>
+    form.province
+      ? SRI_LANKA_LOCATIONS[
+          form.province
+        ] || []
+      : [],
+  );
+
+
+/*
+ * ============================================================
+ * FILTERED PATIENTS
+ * ============================================================
+ */
 
 const filtered =
   computed(() => {
@@ -564,67 +906,78 @@ const filtered =
         .trim()
         .toLowerCase();
 
+    return patients.value.filter(
+      (patient) => {
+        const matchesText =
+          !q ||
+          [
+            patient.firstName,
+            patient.lastName,
+            patient.patientNumber,
+            patient.nic,
+            patient.phone,
+            patient.address,
+            patient.district,
+            patient.province,
+          ]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase()
+            .includes(q);
 
-    return patients.value
-      .filter(
-        (
-          patient,
-        ) => {
-          const matchesText =
-            !q ||
-            [
-              patient.firstName,
-              patient.lastName,
-              patient.patientNumber,
-              patient.nic,
-              patient.phone,
-              patient.address,
-              patient.district,
-              patient.province,
-            ]
-              .filter(Boolean)
-              .join(" ")
-              .toLowerCase()
-              .includes(q);
-
-
-          const matchesGender =
-            !genderFilter.value ||
-            patient.gender ===
+        const matchesGender =
+          !genderFilter.value ||
+          patient.gender ===
             genderFilter.value;
 
-
-          return (
-            matchesText &&
-            matchesGender
-          );
-        },
-      );
+        return (
+          matchesText &&
+          matchesGender
+        );
+      },
+    );
   });
 
 
-const currentAge = computed(() => calculateAge(form.dateOfBirth));
+/*
+ * ============================================================
+ * DERIVED AGE
+ * ============================================================
+ */
 
+const currentAge =
+  computed(() =>
+    calculateAge(
+      form.dateOfBirth,
+    ),
+  );
+
+
+/*
+ * ============================================================
+ * RESET
+ * ============================================================
+ */
 
 function resetForm() {
   Object.assign(
     form,
     {
       firstName: "",
+
       lastName: "",
 
       nic: "",
 
       dateOfBirth: "",
 
-      gender: "Male",
+      gender: "",
 
-      bloodGroup:
-        "O+",
+      bloodGroup: "",
 
-      heightCm: 170,
+      heightCm: "",
 
-      weightKg: 70,
+      weightKg: "",
 
       phone: "",
 
@@ -632,56 +985,85 @@ function resetForm() {
 
       address: "",
 
-      province:
-        "Western Province",
+      province: "",
 
-      district:
-        "Colombo",
+      district: "",
 
       workplace: "",
 
-      foodAllergies:
-        [],
+      allergyStatus: "",
 
-      medicalAllergies:
-        [],
+      foodAllergies: [],
 
-      registrationNotes:
-        "",
+      medicalAllergies: [],
+
+      registrationNotes: "",
     },
   );
 }
 
+
+/*
+ * ============================================================
+ * OPEN REGISTER
+ * ============================================================
+ */
+
+function openRegisterModal() {
+  if (saving.value) {
+    return;
+  }
+
+  resetForm();
+
+  error.value = "";
+
+  editing.value = false;
+
+  editingId.value = "";
+
+  openEdit.value = false;
+
+  openRegister.value = true;
+}
+
+
+/*
+ * ============================================================
+ * CLOSE
+ * ============================================================
+ */
 
 function closeModal() {
   if (saving.value) {
     return;
   }
 
+  openRegister.value = false;
 
-  openRegister.value =
-    false;
+  openEdit.value = false;
 
-  openEdit.value =
-    false;
+  editing.value = false;
 
-  editing.value =
-    false;
+  editingId.value = "";
 
-  error.value =
-    "";
+  error.value = "";
 }
 
+
+/*
+ * ============================================================
+ * EDIT
+ * ============================================================
+ */
 
 function startEdit(
   patient: any,
 ) {
-  editing.value =
-    true;
+  editing.value = true;
 
   editingId.value =
     patient.id;
-
 
   Object.assign(
     form,
@@ -696,7 +1078,9 @@ function startEdit(
         patient.nic,
 
       dateOfBirth:
-        toDateInputValue(patient.dateOfBirth),
+        toDateInputValue(
+          patient.dateOfBirth,
+        ),
 
       gender:
         patient.gender,
@@ -705,10 +1089,10 @@ function startEdit(
         patient.bloodGroup,
 
       heightCm:
-        patient.heightCm,
+        patient.heightCm || "",
 
       weightKg:
-        patient.weightKg,
+        patient.weightKg || "",
 
       phone:
         patient.phone,
@@ -728,17 +1112,19 @@ function startEdit(
       workplace:
         patient.workplace,
 
-      foodAllergies:
-        [
-          ...(patient.foodAllergies ||
-            []),
-        ],
+      allergyStatus:
+        patient.allergyStatus ||
+        "UNKNOWN",
 
-      medicalAllergies:
-        [
-          ...(patient.medicalAllergies ||
-            []),
-        ],
+      foodAllergies: [
+        ...(patient.foodAllergies ||
+          []),
+      ],
+
+      medicalAllergies: [
+        ...(patient.medicalAllergies ||
+          []),
+      ],
 
       registrationNotes:
         patient.registrationNotes ||
@@ -746,41 +1132,237 @@ function startEdit(
     },
   );
 
+  error.value = "";
 
-  error.value =
-    "";
+  openRegister.value =
+    false;
 
   openEdit.value =
     true;
 }
 
 
-async function savePatient() {
-  saving.value =
-    true;
+/*
+ * ============================================================
+ * PROVINCE
+ * ============================================================
+ */
 
-  error.value =
-    "";
+function handleProvinceChange() {
+  if (
+    !availableDistricts.value.includes(
+      form.district,
+    )
+  ) {
+    form.district =
+      "";
+  }
+}
+
+
+/*
+ * ============================================================
+ * ALLERGY STATUS
+ * ============================================================
+ */
+
+function handleAllergyStatusChange() {
+  if (
+    form.allergyStatus !==
+    "HAS_ALLERGIES"
+  ) {
+    form.foodAllergies = [];
+
+    form.medicalAllergies = [];
+  }
+}
+
+
+/*
+ * ============================================================
+ * TOAST
+ * ============================================================
+ */
+
+function showToast(
+  title: string,
+  message: string,
+  type:
+    | "success"
+    | "error" = "success",
+) {
+  toast.visible = false;
+
+  window.setTimeout(() => {
+    toast.title = title;
+
+    toast.message = message;
+
+    toast.type = type;
+
+    toast.visible = true;
+  }, 0);
+}
+
+
+/*
+ * ============================================================
+ * SAVE PATIENT
+ * ============================================================
+ */
+
+async function savePatient() {
+  saving.value = true;
+
+  error.value = "";
 
 
   try {
-    const calculatedAge = calculateAge(form.dateOfBirth);
+    const calculatedAge =
+      calculateAge(
+        form.dateOfBirth,
+      );
 
-    if (!form.dateOfBirth) {
-      throw new Error("Date of birth is required.");
-    }
+
+    /*
+     * --------------------------
+     * AGE
+     * --------------------------
+     */
 
     if (
-      calculatedAge === null ||
-      calculatedAge < 18 ||
-      calculatedAge > 120
+      !form.dateOfBirth
     ) {
       throw new Error(
-        "Only patients aged 18 years or older can be registered.",
+        "Date of birth is required.",
       );
     }
 
-    if (editing.value) {
+
+    if (
+      calculatedAge ===
+        null ||
+      calculatedAge <
+        18 ||
+      calculatedAge >
+        120
+    ) {
+      throw new Error(
+        "Only patients aged between 18 and 120 years can be registered.",
+      );
+    }
+
+
+    /*
+     * --------------------------
+     * GENDER
+     * --------------------------
+     */
+
+    if (!form.gender) {
+      throw new Error(
+        "Gender is required.",
+      );
+    }
+
+
+    /*
+     * --------------------------
+     * PROVINCE
+     * --------------------------
+     */
+
+    if (!form.province) {
+      throw new Error(
+        "Province is required.",
+      );
+    }
+
+
+    /*
+     * --------------------------
+     * DISTRICT
+     * --------------------------
+     */
+
+    if (!form.district) {
+      throw new Error(
+        "District is required.",
+      );
+    }
+
+
+    if (
+      !availableDistricts.value.includes(
+        form.district,
+      )
+    ) {
+      throw new Error(
+        "Select a valid district for the selected province.",
+      );
+    }
+
+
+    /*
+     * --------------------------
+     * ALLERGY
+     * --------------------------
+     */
+
+    if (
+      !form.allergyStatus
+    ) {
+      throw new Error(
+        "Allergy status is required.",
+      );
+    }
+
+
+    if (
+      form.allergyStatus ===
+        "HAS_ALLERGIES" &&
+      !form.foodAllergies
+        .length &&
+      !form.medicalAllergies
+        .length
+    ) {
+      throw new Error(
+        "At least one food or medical / drug allergy is required.",
+      );
+    }
+
+
+    /*
+     * --------------------------
+     * NORMALIZE NO KNOWN
+     * --------------------------
+     */
+
+    if (
+      form.allergyStatus ===
+      "NO_KNOWN_ALLERGIES"
+    ) {
+      form.foodAllergies =
+        [];
+
+      form.medicalAllergies =
+        [];
+    }
+
+
+    const wasEditing =
+      editing.value;
+
+
+    /*
+     * --------------------------
+     * UPDATE
+     * --------------------------
+     */
+
+    if (
+      editing.value
+    ) {
       await updatePatient(
         editingId.value,
         {
@@ -792,7 +1374,15 @@ async function savePatient() {
           ],
         },
       );
-    } else {
+    }
+
+    /*
+     * --------------------------
+     * CREATE
+     * --------------------------
+     */
+
+    else {
       await addPatient({
         ...form,
 
@@ -804,15 +1394,41 @@ async function savePatient() {
     }
 
 
+    /*
+     * --------------------------
+     * SUCCESS
+     * --------------------------
+     */
+
     closeModal();
 
     resetForm();
-  } catch (saveError) {
+
+    showToast(
+      wasEditing
+        ? "Patient updated"
+        : "Patient registered",
+
+      wasEditing
+        ? "The existing patient EHR was updated successfully."
+        : "The permanent patient EHR was created successfully.",
+
+      "success",
+    );
+  } catch (
+    saveError
+  ) {
     error.value =
       saveError instanceof
         Error
         ? saveError.message
         : "Unable to save patient.";
+
+    showToast(
+      "Unable to save patient",
+      error.value,
+      "error",
+    );
   } finally {
     saving.value =
       false;

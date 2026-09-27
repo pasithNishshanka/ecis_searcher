@@ -11,7 +11,11 @@
       />
     </PageHeader>
 
-    <!-- SEARCH CONTEXT -->
+
+    <!-- ======================================================
+         SEARCH CONTEXT
+         ====================================================== -->
+
     <div
       class="mb-5 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
     >
@@ -25,7 +29,9 @@
             Search context
           </p>
 
-          <p class="text-sm font-bold text-slate-700">
+          <p
+            class="text-sm font-bold text-slate-700"
+          >
             {{
               emergencyCaseId
                 ? `Emergency Case #${emergencyCaseId}`
@@ -33,7 +39,9 @@
             }}
           </p>
 
-          <p class="mt-1 text-xs text-slate-400">
+          <p
+            class="mt-1 text-xs text-slate-400"
+          >
             {{
               emergencyCaseId
                 ? "Search linked to an unidentified emergency case."
@@ -41,6 +49,7 @@
             }}
           </p>
         </div>
+
 
         <RouterLink
           v-if="emergencyCaseId"
@@ -56,15 +65,24 @@
       </div>
     </div>
 
-    <div class="grid gap-6 xl:grid-cols-[320px_1fr]">
-      <!-- SEARCH FILTERS -->
+
+    <div
+      class="grid gap-6 xl:grid-cols-[320px_1fr]"
+    >
+      <!-- ====================================================
+           SEARCH FILTERS
+           ==================================================== -->
+
       <aside class="card p-5">
         <div
           class="flex items-center justify-between"
         >
-          <h2 class="section-title text-base">
+          <h2
+            class="section-title text-base"
+          >
             Search filters
           </h2>
+
 
           <BaseButton
             variant="ghost"
@@ -75,8 +93,10 @@
           </BaseButton>
         </div>
 
+
         <div class="mt-5 space-y-4">
           <!-- AGE -->
+
           <RangeField
             label="Age"
             v-model:min-value="f.ageMin"
@@ -86,7 +106,9 @@
             hint="Years"
           />
 
+
           <!-- HEIGHT -->
+
           <RangeField
             label="Height"
             v-model:min-value="f.heightMin"
@@ -97,7 +119,9 @@
             hint="cm"
           />
 
+
           <!-- WEIGHT -->
+
           <RangeField
             label="Weight"
             v-model:min-value="f.weightMin"
@@ -108,7 +132,9 @@
             hint="kg"
           />
 
+
           <!-- BLOOD GROUP -->
+
           <FormField label="Blood group">
             <BaseSelect
               v-model="f.bloodGroup"
@@ -127,7 +153,9 @@
             </BaseSelect>
           </FormField>
 
+
           <!-- GENDER -->
+
           <FormField
             label="Gender / observed sex"
           >
@@ -152,7 +180,69 @@
             </BaseSelect>
           </FormField>
 
+
+          <!-- =================================================
+               PROVINCE
+               ================================================= -->
+
+          <FormField
+            label="Province"
+          >
+            <BaseSelect
+              v-model="f.province"
+              @change="
+                handleProvinceChange
+              "
+            >
+              <option value="">
+                Any
+              </option>
+
+              <option
+                v-for="
+                  province in SRI_LANKAN_PROVINCES
+                "
+                :key="province"
+                :value="province"
+              >
+                {{ province }}
+              </option>
+            </BaseSelect>
+          </FormField>
+
+
+          <!-- =================================================
+               DISTRICT
+               ================================================= -->
+
+          <FormField
+            label="District"
+          >
+            <BaseSelect
+              v-model="f.district"
+              :disabled="
+                !f.province
+              "
+            >
+              <option value="">
+                Any
+              </option>
+
+              <option
+                v-for="
+                  district in availableDistricts
+                "
+                :key="district"
+                :value="district"
+              >
+                {{ district }}
+              </option>
+            </BaseSelect>
+          </FormField>
+
+
           <!-- NAME -->
+
           <FormField
             label="Partial name / initials"
           >
@@ -162,15 +252,21 @@
             />
           </FormField>
 
+
           <!-- PHONE -->
-          <FormField label="Phone digits">
+
+          <FormField
+            label="Phone digits"
+          >
             <BaseInput
               v-model="f.phoneFragment"
               placeholder="4567"
             />
           </FormField>
 
+
           <!-- WORKPLACE -->
+
           <FormField
             label="Workplace / occupation"
           >
@@ -180,53 +276,75 @@
             />
           </FormField>
 
+
           <!-- SURGERY -->
+
           <FormField
             label="Previous surgery"
           >
             <BaseInput
-              v-model="f.previousSurgery"
+              v-model="
+                f.previousSurgery
+              "
               placeholder="fracture fixation"
             />
           </FormField>
 
+
           <!-- FRACTURE -->
-          <FormField label="Old fracture">
+
+          <FormField
+            label="Old fracture"
+          >
             <BaseInput
               v-model="f.fracture"
               placeholder="humerus / femur"
             />
           </FormField>
 
+
           <!-- DEVICE -->
+
           <FormField
             label="Implant / device"
           >
             <BaseInput
-              v-model="f.implantOrDevice"
+              v-model="
+                f.implantOrDevice
+              "
               placeholder="orthopedic plate"
             />
           </FormField>
 
+
           <!-- DENTAL -->
-          <FormField label="Dental clue">
+
+          <FormField
+            label="Dental clue"
+          >
             <BaseInput
               v-model="f.dentalClue"
               placeholder="tooth 11 / crown"
             />
           </FormField>
 
+
           <!-- OBSERVATION -->
+
           <FormField
             label="Clinical observation"
           >
             <BaseInput
-              v-model="f.clinicalObservation"
+              v-model="
+                f.clinicalObservation
+              "
               placeholder="birthmark / scar / tattoo"
             />
           </FormField>
 
+
           <!-- TREATMENT -->
+
           <FormField
             label="Previous treatment"
           >
@@ -236,17 +354,23 @@
             />
           </FormField>
 
+
           <!-- INVESTIGATION -->
+
           <FormField
             label="Investigation"
           >
             <BaseInput
-              v-model="f.investigation"
+              v-model="
+                f.investigation
+              "
               placeholder="X-ray / ECG / blood test"
             />
           </FormField>
 
+
           <!-- PREVIOUS SURGERY EXISTS -->
+
           <label
             class="flex items-center gap-3 rounded-xl border border-slate-200 p-3"
           >
@@ -261,7 +385,9 @@
             </span>
           </label>
 
+
           <!-- SEARCH -->
+
           <BaseButton
             block
             :disabled="loading"
@@ -280,67 +406,114 @@
         </div>
       </aside>
 
-      <!-- RESULTS -->
+
+      <!-- ====================================================
+           RESULTS
+           ==================================================== -->
+
       <main>
         <div
           class="mb-4 flex flex-col justify-between gap-3 sm:flex-row sm:items-center"
         >
           <div>
             <b>{{ results.length }}</b>
+
             candidate{{
               results.length === 1
                 ? ""
                 : "s"
             }}
+
             found
 
-            <p class="text-xs text-slate-400">
-              Candidate score supports staff review;
-              it does not automatically confirm identity.
+            <p
+              class="text-xs text-slate-400"
+            >
+              Candidate score supports
+              staff review; it does not
+              automatically confirm identity.
             </p>
           </div>
 
-          <BaseSelect
-            v-model="sort"
-            class="w-40"
-          >
-            <option value="score">
-              Best match
-            </option>
 
-            <option value="name">
-              Name
-            </option>
-          </BaseSelect>
+          <div
+            class="flex items-center gap-2"
+          >
+            <!-- SECOND SEARCH BUTTON
+                 Makes the action easier
+                 to find on the result side. -->
+
+            <BaseButton
+              variant="secondary"
+              size="sm"
+              :disabled="loading"
+              @click="run"
+            >
+              <template #icon>
+                <Search :size="15" />
+              </template>
+
+              {{
+                loading
+                  ? "Searching..."
+                  : "Search EHR"
+              }}
+            </BaseButton>
+
+
+            <BaseSelect
+              v-model="sort"
+              class="w-40"
+            >
+              <option value="score">
+                Best match
+              </option>
+
+              <option value="name">
+                Name
+              </option>
+            </BaseSelect>
+          </div>
         </div>
 
+
         <!-- ERROR -->
+
         <div
           v-if="error"
           class="card mb-4 border border-red-200 bg-red-50 p-5"
         >
-          <p class="font-bold text-red-700">
+          <p
+            class="font-bold text-red-700"
+          >
             {{ error }}
           </p>
         </div>
 
+
         <!-- LOADING -->
+
         <div
           v-if="loading"
           class="card p-12 text-center"
         >
-          <p class="text-lg font-bold">
+          <p
+            class="text-lg font-bold"
+          >
             Searching EHR...
           </p>
 
           <p
             class="mt-1 text-sm text-slate-400"
           >
-            Matching available clinical and demographic evidence.
+            Matching available clinical
+            and demographic evidence.
           </p>
         </div>
 
+
         <!-- INITIAL STATE -->
+
         <div
           v-else-if="
             !error &&
@@ -348,19 +521,24 @@
           "
           class="card p-12 text-center"
         >
-          <p class="text-lg font-bold">
+          <p
+            class="text-lg font-bold"
+          >
             Ready for ECIS search
           </p>
 
           <p
             class="mt-1 text-sm text-slate-400"
           >
-            Enter one or more available patient clues
-            and search the existing EHR.
+            Enter one or more available
+            patient clues and search the
+            existing EHR.
           </p>
         </div>
 
+
         <!-- NO RESULTS -->
+
         <div
           v-else-if="
             !error &&
@@ -369,25 +547,33 @@
           "
           class="card p-12 text-center"
         >
-          <p class="text-lg font-bold">
+          <p
+            class="text-lg font-bold"
+          >
             No candidates found
           </p>
 
           <p
             class="mt-1 text-sm text-slate-400"
           >
-            Try widening the Min / Max ranges
-            or removing a filter.
+            Try widening the Min / Max
+            ranges or removing a filter.
           </p>
         </div>
 
-        <!-- CANDIDATES -->
+
+        <!-- ==================================================
+             CANDIDATES
+             ================================================== -->
+
         <div
           v-else
           class="space-y-3"
         >
           <article
-            v-for="candidate in sorted"
+            v-for="
+              candidate in sorted
+            "
             :key="
               candidate.patientId
             "
@@ -397,18 +583,20 @@
               class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between"
             >
               <!-- PATIENT -->
+
               <div class="flex gap-3">
                 <div class="avatar">
                   {{
                     firstInitial(
-                      candidate.name
+                      candidate.name,
                     )
                   }}{{
                     lastInitial(
-                      candidate.name
+                      candidate.name,
                     )
                   }}
                 </div>
+
 
                 <div>
                   <h3 class="font-bold">
@@ -423,6 +611,7 @@
                     />
                   </h3>
 
+
                   <p
                     class="mt-1 text-xs text-slate-400"
                   >
@@ -430,7 +619,7 @@
                     {{
                       candidate.age ??
                       age(
-                        candidate.dateOfBirth
+                        candidate.dateOfBirth,
                       )
                     }}
                     ·
@@ -456,6 +645,7 @@
                     kg
                   </p>
 
+
                   <p
                     v-if="
                       candidate.occupation
@@ -467,6 +657,7 @@
                       candidate.occupation
                     }}
                   </p>
+
 
                   <p
                     v-if="
@@ -480,7 +671,9 @@
                     }}
                   </p>
 
+
                   <!-- EVIDENCE -->
+
                   <div
                     v-if="
                       candidate.evidence?.length
@@ -516,6 +709,7 @@
                         </span>
                       </div>
 
+
                       <p
                         class="mt-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400"
                       >
@@ -529,7 +723,9 @@
                 </div>
               </div>
 
+
               <!-- SCORE -->
+
               <div
                 class="flex items-center gap-4"
               >
@@ -539,7 +735,7 @@
                   >
                     {{
                       scorePercent(
-                        candidate.score
+                        candidate.score,
                       )
                     }}%
                   </p>
@@ -551,13 +747,17 @@
                   </p>
                 </div>
 
+
                 <RouterLink
-                  :to="`/patients/${candidate.patientId}`"
+                  :to="
+                    `/patients/${candidate.patientId}`
+                  "
                 >
                   <BaseButton
                     variant="secondary"
                   >
                     Review EHR
+
                     <ArrowRight
                       :size="15"
                     />
@@ -568,19 +768,25 @@
           </article>
         </div>
 
+
         <!-- SAFETY -->
+
         <div
           class="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900"
         >
           <b>Clinical safety:</b>
-          ECIS is a candidate-search and decision-support
-          workflow. Authorized staff must verify identity
-          before confirming or merging a record.
+
+          ECIS is a candidate-search and
+          decision-support workflow.
+          Authorized staff must verify
+          identity before confirming or
+          merging a record.
         </div>
       </main>
     </div>
   </div>
 </template>
+
 
 <script setup lang="ts">
 import {
@@ -589,72 +795,190 @@ import {
   ref,
 } from "vue";
 
+
 import {
   RouterLink,
   useRoute,
 } from "vue-router";
+
 
 import {
   ArrowRight,
   Search,
 } from "lucide-vue-next";
 
-import PageHeader from "../components/PageHeader.vue";
-import BaseButton from "../components/ui/BaseButton.vue";
-import BaseInput from "../components/ui/BaseInput.vue";
-import BaseSelect from "../components/ui/BaseSelect.vue";
-import StatusBadge from "../components/ui/StatusBadge.vue";
-import FormField from "../components/forms/FormField.vue";
-import RangeField from "../components/forms/RangeField.vue";
 
-import { apiPost } from "../services/api";
+import PageHeader
+  from "../components/PageHeader.vue";
+
+import BaseButton
+  from "../components/ui/BaseButton.vue";
+
+import BaseInput
+  from "../components/ui/BaseInput.vue";
+
+import BaseSelect
+  from "../components/ui/BaseSelect.vue";
+
+import StatusBadge
+  from "../components/ui/StatusBadge.vue";
+
+import FormField
+  from "../components/forms/FormField.vue";
+
+import RangeField
+  from "../components/forms/RangeField.vue";
+
+
+import {
+  apiPost,
+} from "../services/api";
+
+
+import {
+  SRI_LANKA_LOCATIONS,
+  SRI_LANKAN_PROVINCES,
+} from "../utils/sriLankaLocations";
+
+
+
+/* ============================================================
+   TYPES
+   ============================================================ */
 
 interface BackendEvidence {
   type: string;
+
   description: string;
+
   sourceTable: string;
+
+  key?: string | null;
+
+  score?: number;
 }
+
 
 interface BackendCandidate {
   patientId: number;
+
   patientNumber: string;
+
   name: string;
-  dateOfBirth: string | null;
-  age: number | null;
-  gender: string | null;
-  bloodGroup: string | null;
-  heightCm: number | null;
-  weightKg: number | null;
-  primaryPhone: string | null;
-  occupation: string | null;
-  nationality: string | null;
+
+  dateOfBirth:
+    | string
+    | null;
+
+  age:
+    | number
+    | null;
+
+  gender:
+    | string
+    | null;
+
+  bloodGroup:
+    | string
+    | null;
+
+  heightCm:
+    | number
+    | null;
+
+  weightKg:
+    | number
+    | null;
+
+  primaryPhone:
+    | string
+    | null;
+
+  occupation:
+    | string
+    | null;
+
+  nationality:
+    | string
+    | null;
+
+  province:
+    | string
+    | null;
+
+  district:
+    | string
+    | null;
+
   hospitalId: number;
-  hospitalName: string | null;
+
+  hospitalName:
+    | string
+    | null;
+
   score: number;
-  evidence: BackendEvidence[];
+
+  evidence:
+    BackendEvidence[];
+
+  matchedScore?: number;
+
+  applicableScore?: number;
+
+  matchedCriteria?: number;
+
+  applicableCriteria?: number;
+
+  fullModelCoveragePercent?: number;
 }
 
-const route = useRoute();
+
+
+/* ============================================================
+   ROUTE
+   ============================================================ */
+
+const route =
+  useRoute();
+
 
 /*
- * Emergency case is OPTIONAL.
+ * Emergency case is optional.
  *
- * Direct ECIS:
+ * Direct search:
  * /ecis
  *
- * Case-linked ECIS:
+ * Emergency-linked search:
  * /ecis?emergencyCaseId=21
  */
-const emergencyCaseId = computed(() => {
-  const value =
-    route.query.emergencyCaseId;
+const emergencyCaseId =
+  computed(() => {
+    const value =
+      route.query
+        .emergencyCaseId;
 
-  if (Array.isArray(value)) {
-    return value[0] || "";
-  }
 
-  return String(value || "");
-});
+    if (
+      Array.isArray(
+        value,
+      )
+    ) {
+      return (
+        value[0] || ""
+      );
+    }
+
+
+    return String(
+      value || "",
+    );
+  });
+
+
+
+/* ============================================================
+   CONSTANTS
+   ============================================================ */
 
 const groups = [
   "O+",
@@ -667,153 +991,304 @@ const groups = [
   "AB-",
 ];
 
-const f = reactive({
-  ageMin:
-    undefined as
-      | number
-      | undefined,
 
-  ageMax:
-    undefined as
-      | number
-      | undefined,
 
-  heightMin:
-    undefined as
-      | number
-      | undefined,
+/* ============================================================
+   SEARCH FORM
+   ============================================================ */
 
-  heightMax:
-    undefined as
-      | number
-      | undefined,
+const f =
+  reactive({
+    ageMin:
+      undefined as
+        | number
+        | undefined,
 
-  weightMin:
-    undefined as
-      | number
-      | undefined,
+    ageMax:
+      undefined as
+        | number
+        | undefined,
 
-  weightMax:
-    undefined as
-      | number
-      | undefined,
+    heightMin:
+      undefined as
+        | number
+        | undefined,
 
-  bloodGroup: "",
-  gender: "",
+    heightMax:
+      undefined as
+        | number
+        | undefined,
 
-  partialName: "",
-  phoneFragment: "",
-  workplace: "",
+    weightMin:
+      undefined as
+        | number
+        | undefined,
 
-  previousSurgery: "",
-  fracture: "",
-  implantOrDevice: "",
+    weightMax:
+      undefined as
+        | number
+        | undefined,
 
-  dentalClue: "",
-  clinicalObservation: "",
-  treatment: "",
-  investigation: "",
 
-  hasSurgery: false,
-});
+    bloodGroup:
+      "",
+
+    gender:
+      "",
+
+
+    /*
+     * NEW
+     */
+    province:
+      "",
+
+    district:
+      "",
+
+
+    partialName:
+      "",
+
+    phoneFragment:
+      "",
+
+    workplace:
+      "",
+
+    previousSurgery:
+      "",
+
+    fracture:
+      "",
+
+    implantOrDevice:
+      "",
+
+    dentalClue:
+      "",
+
+    clinicalObservation:
+      "",
+
+    treatment:
+      "",
+
+    investigation:
+      "",
+
+
+    hasSurgery:
+      false,
+  });
+
+
+
+/* ============================================================
+   RESULTS
+   ============================================================ */
 
 const results =
-  ref<BackendCandidate[]>(
-    [],
-  );
+  ref<
+    BackendCandidate[]
+  >([]);
+
 
 const loading =
   ref(false);
 
+
 const error =
   ref("");
+
 
 const hasSearched =
   ref(false);
 
+
 const sort =
   ref("score");
+
+
+
+/* ============================================================
+   DISTRICT OPTIONS
+   ============================================================ */
+
+const availableDistricts =
+  computed(() => {
+    if (
+      !f.province
+    ) {
+      return [];
+    }
+
+
+    return (
+      SRI_LANKA_LOCATIONS[
+        f.province
+      ] || []
+    );
+  });
+
+
+
+/* ============================================================
+   SORT RESULTS
+   ============================================================ */
 
 const sorted =
   computed(() => {
     return [
       ...results.value,
     ].sort(
-      (a, b) => {
+      (
+        a,
+        b,
+      ) => {
         if (
           sort.value ===
           "name"
         ) {
           return String(
-            a.name || ""
+            a.name || "",
           ).localeCompare(
             String(
-              b.name || ""
-            )
+              b.name || "",
+            ),
           );
         }
 
+
         return (
           (Number(
-            b.score
+            b.score,
           ) || 0) -
           (Number(
-            a.score
+            a.score,
           ) || 0)
         );
       },
     );
   });
 
-async function run() {
-  error.value = "";
 
-  const searchCriteria: Record<
-    string,
-    unknown
-  > = {};
+
+/* ============================================================
+   PROVINCE CHANGE
+   ============================================================ */
+
+function handleProvinceChange() {
+  /*
+   * When province changes, clear an
+   * incompatible district.
+   */
+  if (
+    !f.province ||
+    !availableDistricts.value.includes(
+      f.district,
+    )
+  ) {
+    f.district =
+      "";
+  }
+}
+
+
+
+/* ============================================================
+   SEARCH
+   ============================================================ */
+
+async function run() {
+  error.value =
+    "";
+
+
+  const searchCriteria:
+    Record<
+      string,
+      unknown
+    > = {};
+
+
+  /*
+   * ----------------------------------------------------------
+   * AGE
+   * ----------------------------------------------------------
+   */
 
   if (
-    f.ageMin !== undefined
+    f.ageMin !==
+    undefined
   ) {
     searchCriteria.ageMin =
       f.ageMin;
   }
 
+
   if (
-    f.ageMax !== undefined
+    f.ageMax !==
+    undefined
   ) {
     searchCriteria.ageMax =
       f.ageMax;
   }
 
+
+  /*
+   * ----------------------------------------------------------
+   * HEIGHT
+   * ----------------------------------------------------------
+   */
+
   if (
-    f.heightMin !== undefined
+    f.heightMin !==
+    undefined
   ) {
     searchCriteria.heightMin =
       f.heightMin;
   }
 
+
   if (
-    f.heightMax !== undefined
+    f.heightMax !==
+    undefined
   ) {
     searchCriteria.heightMax =
       f.heightMax;
   }
 
+
+  /*
+   * ----------------------------------------------------------
+   * WEIGHT
+   * ----------------------------------------------------------
+   */
+
   if (
-    f.weightMin !== undefined
+    f.weightMin !==
+    undefined
   ) {
     searchCriteria.weightMin =
       f.weightMin;
   }
 
+
   if (
-    f.weightMax !== undefined
+    f.weightMax !==
+    undefined
   ) {
     searchCriteria.weightMax =
       f.weightMax;
   }
+
+
+  /*
+   * ----------------------------------------------------------
+   * BLOOD GROUP
+   * ----------------------------------------------------------
+   */
 
   if (
     f.bloodGroup
@@ -822,10 +1297,54 @@ async function run() {
       f.bloodGroup;
   }
 
-  if (f.gender) {
+
+  /*
+   * ----------------------------------------------------------
+   * GENDER
+   * ----------------------------------------------------------
+   */
+
+  if (
+    f.gender
+  ) {
     searchCriteria.gender =
       f.gender;
   }
+
+
+  /*
+   * ----------------------------------------------------------
+   * PROVINCE
+   * ----------------------------------------------------------
+   */
+
+  if (
+    f.province
+  ) {
+    searchCriteria.province =
+      f.province;
+  }
+
+
+  /*
+   * ----------------------------------------------------------
+   * DISTRICT
+   * ----------------------------------------------------------
+   */
+
+  if (
+    f.district
+  ) {
+    searchCriteria.district =
+      f.district;
+  }
+
+
+  /*
+   * ----------------------------------------------------------
+   * NAME
+   * ----------------------------------------------------------
+   */
 
   if (
     f.partialName.trim()
@@ -834,12 +1353,26 @@ async function run() {
       f.partialName.trim();
   }
 
+
+  /*
+   * ----------------------------------------------------------
+   * PHONE
+   * ----------------------------------------------------------
+   */
+
   if (
     f.phoneFragment.trim()
   ) {
     searchCriteria.phoneFragment =
       f.phoneFragment.trim();
   }
+
+
+  /*
+   * ----------------------------------------------------------
+   * WORKPLACE
+   * ----------------------------------------------------------
+   */
 
   if (
     f.workplace.trim()
@@ -848,12 +1381,26 @@ async function run() {
       f.workplace.trim();
   }
 
+
+  /*
+   * ----------------------------------------------------------
+   * SURGERY
+   * ----------------------------------------------------------
+   */
+
   if (
     f.previousSurgery.trim()
   ) {
     searchCriteria.previousSurgery =
       f.previousSurgery.trim();
   }
+
+
+  /*
+   * ----------------------------------------------------------
+   * FRACTURE
+   * ----------------------------------------------------------
+   */
 
   if (
     f.fracture.trim()
@@ -862,12 +1409,26 @@ async function run() {
       f.fracture.trim();
   }
 
+
+  /*
+   * ----------------------------------------------------------
+   * DEVICE
+   * ----------------------------------------------------------
+   */
+
   if (
     f.implantOrDevice.trim()
   ) {
     searchCriteria.implantOrDevice =
       f.implantOrDevice.trim();
   }
+
+
+  /*
+   * ----------------------------------------------------------
+   * DENTAL
+   * ----------------------------------------------------------
+   */
 
   if (
     f.dentalClue.trim()
@@ -876,12 +1437,26 @@ async function run() {
       f.dentalClue.trim();
   }
 
+
+  /*
+   * ----------------------------------------------------------
+   * CLINICAL OBSERVATION
+   * ----------------------------------------------------------
+   */
+
   if (
     f.clinicalObservation.trim()
   ) {
     searchCriteria.clinicalObservation =
       f.clinicalObservation.trim();
   }
+
+
+  /*
+   * ----------------------------------------------------------
+   * TREATMENT
+   * ----------------------------------------------------------
+   */
 
   if (
     f.treatment.trim()
@@ -890,6 +1465,13 @@ async function run() {
       f.treatment.trim();
   }
 
+
+  /*
+   * ----------------------------------------------------------
+   * INVESTIGATION
+   * ----------------------------------------------------------
+   */
+
   if (
     f.investigation.trim()
   ) {
@@ -897,12 +1479,17 @@ async function run() {
       f.investigation.trim();
   }
 
+
   /*
-   * Previous surgery checkbox:
-   * The backend currently searches using previousSurgery.
-   * Therefore the checkbox alone does not create a fake
-   * unsupported search criterion.
+   * ----------------------------------------------------------
+   * SURGERY CHECKBOX
+   * ----------------------------------------------------------
+   *
+   * Checkbox alone cannot create a fake
+   * clinical clue. Require the actual
+   * surgery text.
    */
+
   if (
     f.hasSurgery &&
     !f.previousSurgery.trim()
@@ -910,12 +1497,21 @@ async function run() {
     error.value =
       "Enter a previous surgery clue or uncheck Previous surgery.";
 
-    results.value = [];
+    results.value =
+      [];
+
     hasSearched.value =
       false;
 
     return;
   }
+
+
+  /*
+   * ----------------------------------------------------------
+   * AT LEAST ONE SEARCH CRITERION
+   * ----------------------------------------------------------
+   */
 
   if (
     Object.keys(
@@ -925,100 +1521,197 @@ async function run() {
     error.value =
       "Enter at least one search clue before searching.";
 
-    results.value = [];
+    results.value =
+      [];
+
     hasSearched.value =
       false;
 
     return;
   }
 
-  loading.value = true;
+
+  /*
+   * ----------------------------------------------------------
+   * SEARCH
+   * ----------------------------------------------------------
+   */
+
+  loading.value =
+    true;
+
   hasSearched.value =
     true;
 
+
   try {
-    const payload: Record<
-      string,
-      unknown
-    > = {
-      ...searchCriteria,
-    };
+    const payload:
+      Record<
+        string,
+        unknown
+      > = {
+        ...searchCriteria,
+      };
+
 
     /*
-     * Optional emergency context.
+     * Attach actual emergency case
+     * when this is a case-linked ECIS
+     * workflow.
      */
+
     if (
       emergencyCaseId.value
     ) {
-      payload.emergencyCaseId =
+      const id =
         Number(
           emergencyCaseId.value,
         );
+
+
+      if (
+        Number.isInteger(
+          id,
+        ) &&
+        id > 0
+      ) {
+        payload.emergencyCaseId =
+          id;
+      }
     }
+
 
     const response =
       await apiPost<{
         success?: boolean;
-        candidates?: BackendCandidate[];
-        results?: BackendCandidate[];
-        data?: BackendCandidate[];
+
+        candidates?:
+          BackendCandidate[];
+
+        results?:
+          BackendCandidate[];
+
+        data?:
+          BackendCandidate[];
       }>(
         "/ecis/search",
         payload,
       );
+
 
     results.value =
       response?.candidates ||
       response?.results ||
       response?.data ||
       [];
-  } catch (err) {
+  } catch (
+    err
+  ) {
     error.value =
-      err instanceof Error
+      err instanceof
+        Error
         ? err.message
         : "ECIS search failed.";
 
-    results.value = [];
+    results.value =
+      [];
   } finally {
-    loading.value = false;
+    loading.value =
+      false;
   }
 }
 
+
+
+/* ============================================================
+   CLEAR FILTERS
+   ============================================================ */
+
 function clear() {
-  Object.assign(f, {
-    ageMin: undefined,
-    ageMax: undefined,
+  Object.assign(
+    f,
+    {
+      ageMin:
+        undefined,
 
-    heightMin: undefined,
-    heightMax: undefined,
+      ageMax:
+        undefined,
 
-    weightMin: undefined,
-    weightMax: undefined,
+      heightMin:
+        undefined,
 
-    bloodGroup: "",
-    gender: "",
+      heightMax:
+        undefined,
 
-    partialName: "",
-    phoneFragment: "",
-    workplace: "",
+      weightMin:
+        undefined,
 
-    previousSurgery: "",
-    fracture: "",
-    implantOrDevice: "",
+      weightMax:
+        undefined,
 
-    dentalClue: "",
-    clinicalObservation: "",
-    treatment: "",
-    investigation: "",
+      bloodGroup:
+        "",
 
-    hasSurgery: false,
-  });
+      gender:
+        "",
 
-  results.value = [];
-  error.value = "";
+      province:
+        "",
+
+      district:
+        "",
+
+      partialName:
+        "",
+
+      phoneFragment:
+        "",
+
+      workplace:
+        "",
+
+      previousSurgery:
+        "",
+
+      fracture:
+        "",
+
+      implantOrDevice:
+        "",
+
+      dentalClue:
+        "",
+
+      clinicalObservation:
+        "",
+
+      treatment:
+        "",
+
+      investigation:
+        "",
+
+      hasSurgery:
+        false,
+    },
+  );
+
+
+  results.value =
+    [];
+
+  error.value =
+    "";
+
   hasSearched.value =
     false;
 }
+
+
+
+/* ============================================================
+   AGE
+   ============================================================ */
 
 function age(
   dateOfBirth:
@@ -1026,14 +1719,18 @@ function age(
     | null
     | undefined,
 ) {
-  if (!dateOfBirth) {
+  if (
+    !dateOfBirth
+  ) {
     return "-";
   }
+
 
   const birthDate =
     new Date(
       dateOfBirth,
     );
+
 
   if (
     Number.isNaN(
@@ -1043,12 +1740,21 @@ function age(
     return "-";
   }
 
+
   return Math.floor(
-    (Date.now() -
-      birthDate.getTime()) /
+    (
+      Date.now() -
+      birthDate.getTime()
+    ) /
       31557600000,
   );
 }
+
+
+
+/* ============================================================
+   INITIALS
+   ============================================================ */
 
 function firstInitial(
   name: string,
@@ -1062,15 +1768,21 @@ function firstInitial(
   );
 }
 
+
 function lastInitial(
   name: string,
 ) {
   const parts =
     name
       ?.trim()
-      .split(/\s+/)
-      .filter(Boolean) ||
+      .split(
+        /\s+/,
+      )
+      .filter(
+        Boolean,
+      ) ||
     [];
+
 
   if (
     parts.length < 2
@@ -1078,14 +1790,22 @@ function lastInitial(
     return "";
   }
 
+
   return (
     parts[
       parts.length - 1
-    ]?.charAt(0)
+    ]
+      ?.charAt(0)
       .toUpperCase() ||
     ""
   );
 }
+
+
+
+/* ============================================================
+   SCORE DISPLAY
+   ============================================================ */
 
 function scorePercent(
   score: number,

@@ -1,5 +1,12 @@
 <template>
   <div v-if="patient">
+    <AppToast
+      :visible="toast.visible"
+      :title="toast.title"
+      :message="toast.message"
+      :type="toast.type"
+      @close="toast.visible = false"
+    />
     <PageHeader
       eyebrow="Patient EHR"
       :title="`${patient.firstName} ${patient.lastName}`"
@@ -155,9 +162,19 @@
         <div
           class="rounded-2xl border border-amber-200 bg-amber-50 p-5"
         >
-          <p class="font-bold text-amber-900">
-            Allergy information
-          </p>
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <p class="font-bold text-amber-900">
+                Allergy information
+              </p>
+              <p class="mt-1 text-xs text-amber-800">
+                {{ allergyStatusLabel(patient.allergyStatus) }}
+              </p>
+            </div>
+            <span class="badge bg-white text-amber-800">
+              Clinical safety
+            </span>
+          </div>
 
 
           <div class="mt-4 space-y-4">
@@ -1034,6 +1051,32 @@
         openTreatment = false
       "
     >
+      <div
+        class="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-4"
+      >
+        <p class="text-xs font-black uppercase tracking-wide text-amber-700">
+          Allergy information
+        </p>
+
+        <p class="mt-1 font-bold text-amber-900">
+          {{ allergyStatusLabel(patient.allergyStatus) }}
+        </p>
+
+        <p
+          v-if="patient.foodAllergies?.length || patient.medicalAllergies?.length"
+          class="mt-2 text-sm leading-5 text-amber-900"
+        >
+          {{ allergyDisplayText(patient) }}
+        </p>
+
+        <p
+          v-else
+          class="mt-2 text-xs text-amber-800"
+        >
+          Review the patient's allergy status before entering clinical treatment information.
+        </p>
+      </div>
+
       <form
         @submit.prevent="
           save
@@ -1342,6 +1385,9 @@ import PageHeader
 import Modal
   from "../components/Modal.vue";
 
+import AppToast
+  from "../components/ui/AppToast.vue";
+
 import {
   apiGet,
 } from "../services/api";
@@ -1479,6 +1525,15 @@ const evidenceLoading =
 
 const evidenceError =
   ref("");
+
+
+const toast =
+  reactive({
+    visible: false,
+    title: "",
+    message: "",
+    type: "success" as "success" | "error",
+  });
 
 
 const evidence =
@@ -2573,6 +2628,59 @@ async function loadAdmissionHistory() {
 }
 
 
+function allergyStatusLabel(status: string | undefined) {
+  switch (status) {
+    case "NO_KNOWN_ALLERGIES":
+      return "No known allergies";
+    case "HAS_ALLERGIES":
+      return "Has recorded allergies";
+    case "UNKNOWN":
+      return "Allergy status unknown / not determined";
+    default:
+      return "Allergy status not recorded";
+  }
+}
+
+
+function allergyDisplayText(patientData: any) {
+  const food =
+    patientData?.foodAllergies ||
+    [];
+
+  const medical =
+    patientData?.medicalAllergies ||
+    [];
+
+  const parts = [];
+
+  if (food.length) {
+    parts.push(`Food: ${food.join(", ")}`);
+  }
+
+  if (medical.length) {
+    parts.push(`Medical / drug: ${medical.join(", ")}`);
+  }
+
+  return parts.join(" · ");
+}
+
+
+function showToast(
+  title: string,
+  message: string,
+  type: "success" | "error" = "success",
+) {
+  toast.visible = false;
+
+  window.setTimeout(() => {
+    toast.title = title;
+    toast.message = message;
+    toast.type = type;
+    toast.visible = true;
+  }, 0);
+}
+
+
 /* ============================================================
    CLINICAL RECORD
    ============================================================ */
@@ -2637,26 +2745,66 @@ const t =
   });
 
 
-function save() {
-  if (
-    !patient.value
-  ) {
+async function save() {
+  if (!patient.value) {
     return;
   }
 
-  void addTreatment({
-    ...t,
+  if (!String(t.treatment || "").trim()) {
+    showToast(
+      "Treatment required",
+      "Enter the treatment or procedure before saving the clinical record.",
+      "error",
+    );
+    return;
+  }
 
-    patientId:
-      patient.value.id,
-  });
+  try {
+    await addTreatment({
+      ...t,
+      treatment: String(t.treatment).trim(),
+      patientId: patient.value.id,
+    });
 
-  openTreatment.value =
-    false;
+    openTreatment.value = false;
 
-  alert(
-    "Clinical record saved to this patient EHR.",
-  );
+    const today =
+      new Date()
+        .toISOString()
+        .slice(0, 10);
+
+    Object.assign(t, {
+      type: "OPD",
+      date: today,
+      department: "Medicine",
+      doctor: "",
+      diagnosis: "",
+      treatment: "",
+      notes: "",
+      bodyRegion: "",
+      clinicalFinding: "",
+      implant: "",
+      implantSerial: "",
+      scar: "",
+      oldFracture: "",
+      birthmark: "",
+      tattoo: "",
+      missingBodyPart: "",
+    });
+
+    showToast(
+      "Clinical record saved",
+      "The treatment record has been added to the patient's longitudinal EHR.",
+    );
+  } catch (error) {
+    showToast(
+      "Unable to save clinical record",
+      error instanceof Error
+        ? error.message
+        : "Unable to save the clinical record.",
+      "error",
+    );
+  }
 }
 
 
