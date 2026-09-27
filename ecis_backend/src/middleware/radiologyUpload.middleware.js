@@ -198,6 +198,22 @@ const multerUpload = multer({
     file,
     callback,
   ) => {
+    const hasDicomExtension =
+      path.extname(
+        file.originalname || "",
+      ).toLowerCase() === ".dcm";
+
+    if (
+      file.mimetype === "application/octet-stream" &&
+      hasDicomExtension
+    ) {
+      /*
+       * Browsers often do not recognise the DICOM MIME type. The
+       * post-upload signature validation still requires its DICM marker.
+       */
+      file.mimetype = "application/dicom";
+    }
+
     if (!allowedMimeTypes.has(file.mimetype)) {
       callback(
         createUploadError(

@@ -560,9 +560,9 @@
               </div>
 
 
-              <div
-                v-if="
-                  order.clinical_notes
+               <div
+                 v-if="
+                   order.clinical_notes
                 "
                 class="mt-3 rounded-xl bg-slate-50 p-4"
               >
@@ -576,11 +576,130 @@
                   {{
                     order.clinical_notes
                   }}
-                </p>
-              </div>
+                 </p>
+               </div>
 
 
-              <div
+               <div
+                 class="mt-4 rounded-xl border border-slate-200 p-4"
+               >
+                 <div
+                   class="flex flex-col justify-between gap-3 sm:flex-row sm:items-center"
+                 >
+                   <div>
+                     <p class="label">
+                       Radiology images
+                     </p>
+
+                     <p class="mt-1 text-xs text-slate-500">
+                       JPEG, PNG, WebP, or DICOM · maximum 20 MB per file
+                     </p>
+                   </div>
+
+                   <label
+                     class="inline-flex cursor-pointer items-center justify-center rounded-xl bg-teal-700 px-3 py-2 text-sm font-semibold text-white transition hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-60"
+                     :class="
+                       uploadingOrderId === order.investigation_id ||
+                       order.status === 'CANCELLED'
+                         ? 'pointer-events-none opacity-60'
+                         : ''
+                     "
+                   >
+                     <Upload :size="15" />
+
+                     <span class="ml-2">
+                       {{
+                         uploadingOrderId === order.investigation_id
+                           ? 'Uploading...'
+                           : 'Upload images'
+                       }}
+                     </span>
+
+                     <input
+                       class="sr-only"
+                       type="file"
+                       multiple
+                       accept="image/jpeg,image/png,image/webp,application/dicom,.dcm"
+                       :disabled="
+                         uploadingOrderId === order.investigation_id ||
+                         order.status === 'CANCELLED'
+                       "
+                       @change="
+                         uploadImages(
+                           $event,
+                           order,
+                         )
+                       "
+                     />
+                   </label>
+                 </div>
+
+
+                 <div
+                   v-if="
+                     radiologyImages(order).length
+                   "
+                   class="mt-4 divide-y divide-slate-100"
+                 >
+                   <div
+                     v-for="image in radiologyImages(order)"
+                     :key="imageId(image)"
+                     class="flex flex-col justify-between gap-3 py-3 first:pt-0 last:pb-0 sm:flex-row sm:items-center"
+                   >
+                     <div class="min-w-0">
+                       <p class="truncate text-sm font-semibold text-slate-800">
+                         {{ image.fileName }}
+                       </p>
+
+                       <p class="mt-1 text-xs text-slate-400">
+                         {{ image.mimeType }}
+                         · {{ formatBytes(image.sizeBytes) }}
+                         · {{ formatDate(image.uploadedAt) }}
+                       </p>
+                     </div>
+
+                     <div class="flex shrink-0 gap-2">
+                       <BaseButton
+                         v-if="
+                           image.mimeType !== 'application/dicom'
+                         "
+                         variant="secondary"
+                         size="sm"
+                         @click="openImagePreview(image)"
+                       >
+                         <template #icon>
+                           <Eye :size="15" />
+                         </template>
+
+                         Preview
+                       </BaseButton>
+
+                       <BaseButton
+                         variant="secondary"
+                         size="sm"
+                         @click="downloadImage(image)"
+                       >
+                         <template #icon>
+                           <Download :size="15" />
+                         </template>
+
+                         Download
+                       </BaseButton>
+                     </div>
+                   </div>
+                 </div>
+
+
+                 <p
+                   v-else
+                   class="mt-4 text-sm text-slate-400"
+                 >
+                   No image files uploaded for this radiology order.
+                 </p>
+               </div>
+
+
+               <div
                 class="mt-4 flex flex-wrap items-center justify-between gap-3 border-t pt-4"
               >
                 <p class="text-xs text-slate-400">
@@ -1014,6 +1133,69 @@
         </div>
       </form>
     </Modal>
+
+
+    <Modal
+      :open="
+        Boolean(activeImagePreview)
+      "
+      :title="
+        activeImagePreview?.fileName ||
+        'Radiology image preview'
+      "
+      description="This clinical image is retrieved through the authenticated radiology service."
+      @close="closeImagePreview"
+    >
+      <div
+        v-if="activeImagePreview"
+        class="space-y-4"
+      >
+        <div
+          v-if="previewLoading"
+          class="grid min-h-64 place-items-center rounded-xl bg-slate-50 text-sm text-slate-400"
+        >
+          Loading image securely...
+        </div>
+
+        <img
+          v-else-if="activeImagePreview.url"
+          :src="activeImagePreview.url"
+          :alt="activeImagePreview.fileName"
+          class="max-h-[65vh] w-full rounded-xl bg-slate-950 object-contain"
+        />
+
+        <div
+          v-else
+          class="rounded-xl bg-slate-50 p-5 text-sm text-slate-600"
+        >
+          The image preview could not be loaded. Download the file to open it in an approved clinical viewer.
+        </div>
+
+        <div
+          v-if="previewError"
+          class="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+        >
+          {{ previewError }}
+        </div>
+
+        <div class="flex justify-end">
+          <BaseButton
+            variant="secondary"
+            @click="
+              downloadImage(
+                activeImagePreview,
+              )
+            "
+          >
+            <template #icon>
+              <Download :size="15" />
+            </template>
+
+            Download image
+          </BaseButton>
+        </div>
+      </div>
+    </Modal>
   </div>
 </template>
 
@@ -1021,6 +1203,7 @@
 <script setup lang="ts">
 import {
   computed,
+  onBeforeUnmount,
   reactive,
   ref,
   watch,
@@ -1028,8 +1211,11 @@ import {
 
 import {
   CheckCircle2,
+  Download,
+  Eye,
   Plus,
   ScanLine,
+  Upload,
 } from "lucide-vue-next";
 
 import PageHeader
@@ -1058,8 +1244,10 @@ import BaseTextarea
 
 import {
   apiGet,
+  apiGetBlob,
   apiPost,
   apiPut,
+  apiUpload,
 } from "../services/api";
 
 import {
@@ -1088,6 +1276,28 @@ const encounters =
 
 const orders =
   ref<any[]>([]);
+
+const uploadingOrderId =
+  ref<number | null>(null);
+
+const activeImagePreview =
+  ref<{
+    imageId: number;
+    fileName: string;
+    mimeType: string;
+    sizeBytes: number;
+    uploadedAt?: string;
+    url: string;
+  } | null>(null);
+
+const previewLoading =
+  ref(false);
+
+const previewError =
+  ref("");
+
+const imageUrls =
+  new Map<number, string>();
 
 
 const loadingEncounters =
@@ -1363,6 +1573,274 @@ function priorityClass(
 
     default:
       return "bg-blue-50 text-blue-700";
+  }
+}
+
+
+function radiologyImages(
+  order: any,
+) {
+  return Array.isArray(order?.images)
+    ? order.images
+    : [];
+}
+
+
+function imageId(
+  image: any,
+) {
+  return Number(
+    image?.imageId ??
+      image?.radiology_image_id ??
+      0,
+  );
+}
+
+
+function imageFileName(
+  image: any,
+) {
+  return String(
+    image?.fileName ??
+      image?.original_filename ??
+      "Radiology image",
+  );
+}
+
+
+function imageMimeType(
+  image: any,
+) {
+  return String(
+    image?.mimeType ??
+      image?.mime_type ??
+      "application/octet-stream",
+  );
+}
+
+
+function imageSizeBytes(
+  image: any,
+) {
+  return Number(
+    image?.sizeBytes ??
+      image?.size_bytes ??
+      0,
+  );
+}
+
+
+function formatBytes(
+  bytes: unknown,
+) {
+  const value = Number(bytes);
+
+  if (!Number.isFinite(value) || value <= 0) {
+    return "—";
+  }
+
+  if (value < 1024 * 1024) {
+    return `${Math.round(value / 1024)} KB`;
+  }
+
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+
+function clearImageUrls() {
+  for (const url of imageUrls.values()) {
+    URL.revokeObjectURL(url);
+  }
+
+  imageUrls.clear();
+}
+
+
+function closeImagePreview() {
+  activeImagePreview.value =
+    null;
+
+  previewError.value =
+    "";
+}
+
+
+async function openImagePreview(
+  image: any,
+) {
+  const id = imageId(image);
+
+  if (!id) {
+    return;
+  }
+
+  previewError.value =
+    "";
+
+  previewLoading.value =
+    true;
+
+  activeImagePreview.value = {
+    imageId: id,
+    fileName: imageFileName(image),
+    mimeType: imageMimeType(image),
+    sizeBytes: imageSizeBytes(image),
+    uploadedAt:
+      image?.uploadedAt ??
+      image?.uploaded_at,
+    url: imageUrls.get(id) || "",
+  };
+
+  try {
+    let url = imageUrls.get(id);
+
+    if (!url) {
+      const blob = await apiGetBlob(
+        `/radiology/images/${id}/file`,
+      );
+
+      url = URL.createObjectURL(blob);
+
+      imageUrls.set(id, url);
+    }
+
+    if (
+      activeImagePreview.value?.imageId ===
+      id
+    ) {
+      activeImagePreview.value.url =
+        url;
+    }
+  } catch (err) {
+    previewError.value =
+      err instanceof Error
+        ? err.message
+        : "Unable to load the radiology image.";
+  } finally {
+    previewLoading.value =
+      false;
+  }
+}
+
+
+async function downloadImage(
+  image: any,
+) {
+  const id = imageId(image);
+
+  if (!id) {
+    return;
+  }
+
+  error.value =
+    "";
+
+  try {
+    const blob = await apiGetBlob(
+      `/radiology/images/${id}/file?download=1`,
+    );
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = imageFileName(image);
+
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+
+    window.setTimeout(
+      () => URL.revokeObjectURL(url),
+      1000,
+    );
+  } catch (err) {
+    error.value =
+      err instanceof Error
+        ? err.message
+        : "Unable to download the radiology image.";
+  }
+}
+
+
+async function uploadImages(
+  event: Event,
+  order: any,
+) {
+  const input = event.target as HTMLInputElement;
+  const files = Array.from(input.files || []);
+  const orderId = Number(
+    order?.investigation_id,
+  );
+
+  input.value = "";
+
+  if (!files.length || !orderId) {
+    return;
+  }
+
+  const allowedMimeTypes = new Set([
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "application/dicom",
+  ]);
+
+  const invalidFile = files.find(
+    (file) => {
+      const isDicom =
+        /\.dcm$/i.test(file.name) &&
+        [
+          "",
+          "application/octet-stream",
+          "application/dicom",
+        ].includes(file.type);
+
+      return (
+        (!allowedMimeTypes.has(file.type) &&
+          !isDicom) ||
+        file.size > 20 * 1024 * 1024
+      );
+    },
+  );
+
+  if (invalidFile) {
+    error.value =
+      "Choose JPEG, PNG, WebP, or DICOM files no larger than 20 MB.";
+
+    return;
+  }
+
+  uploadingOrderId.value =
+    orderId;
+
+  error.value =
+    "";
+
+  try {
+    const formData = new FormData();
+
+    for (const file of files) {
+      formData.append(
+        "images",
+        file,
+      );
+    }
+
+    await apiUpload(
+      `/radiology/orders/${orderId}/images`,
+      formData,
+    );
+
+    await loadOrders();
+  } catch (err) {
+    error.value =
+      err instanceof Error
+        ? err.message
+        : "Unable to upload radiology images.";
+  } finally {
+    uploadingOrderId.value =
+      null;
   }
 }
 
@@ -1819,7 +2297,15 @@ watch(
     selectedPatient.value?.id,
 
   () => {
+    clearImageUrls();
+    closeImagePreview();
+
     void loadPatientData();
   },
 );
+
+
+onBeforeUnmount(() => {
+  clearImageUrls();
+});
 </script>

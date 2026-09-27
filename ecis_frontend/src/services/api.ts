@@ -26,6 +26,16 @@ interface RefreshResponse {
 }
 
 
+function isFormDataBody(
+  body: BodyInit | null | undefined,
+): body is FormData {
+  return (
+    typeof FormData !== "undefined" &&
+    body instanceof FormData
+  );
+}
+
+
 /* ============================================================
    AUTH STATE
    ============================================================ */
@@ -262,7 +272,8 @@ async function request(
   if (
     !headers.has(
       "Content-Type",
-    )
+    ) &&
+    !isFormDataBody(options.body)
   ) {
     headers.set(
       "Content-Type",
@@ -425,6 +436,24 @@ export function apiPost<T>(
 
 
 /* ============================================================
+   MULTIPART UPLOAD
+   ============================================================ */
+
+export function apiUpload<T>(
+  endpoint: string,
+  formData: FormData,
+): Promise<T> {
+  return apiRequest<T>(
+    endpoint,
+    {
+      method: "POST",
+      body: formData,
+    },
+  );
+}
+
+
+/* ============================================================
    PUT
    ============================================================ */
 
@@ -457,6 +486,97 @@ export function apiDelete<T>(
       method: "DELETE",
     },
   );
+}
+
+
+/* ============================================================
+   AUTHENTICATED BINARY DOWNLOAD
+   ============================================================ */
+
+async function binaryRequest(
+  endpoint: string,
+  token: string | null,
+): Promise<Response> {
+  const controller =
+    new AbortController();
+
+  const timeout =
+    window.setTimeout(
+      () => controller.abort(),
+      REQUEST_TIMEOUT_MS,
+    );
+
+  try {
+    const headers = new Headers();
+
+    if (token) {
+      headers.set(
+        "Authorization",
+        `Bearer ${token}`,
+      );
+    }
+
+    return await fetch(
+      `${API_BASE_URL}${endpoint}`,
+      {
+        method: "GET",
+        headers,
+        signal: controller.signal,
+      },
+    );
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
+
+export async function apiGetBlob(
+  endpoint: string,
+): Promise<Blob> {
+  let token = getAccessToken();
+
+  let response =
+    await binaryRequest(
+      endpoint,
+      token,
+    );
+
+  if (response.status === 401 && token) {
+    const newToken =
+      await getNewAccessToken();
+
+    if (newToken) {
+      token = newToken;
+
+      response = await binaryRequest(
+        endpoint,
+        token,
+      );
+    }
+  }
+
+  if (!response.ok) {
+    let message =
+      `Request failed with status ${response.status}.`;
+
+    try {
+      const data =
+        (await response.json()) as ApiErrorResponse;
+
+      message = data?.message || message;
+    } catch {
+      // Keep the response-status fallback message.
+    }
+
+    if (response.status === 401) {
+      clearAuthentication();
+      redirectToLogin();
+    }
+
+    throw new Error(message);
+  }
+
+  return response.blob();
 }
 
 

@@ -73,7 +73,7 @@ async function login({
     );
   }
 
-  const normalizedUsername =
+  const normalizedIdentifier =
     String(username)
       .trim()
       .toLowerCase();
@@ -94,10 +94,12 @@ async function login({
         email,
         is_active
       FROM public.hospital_users
-      WHERE LOWER(TRIM(username)) = $1
+      WHERE
+        LOWER(TRIM(username)) = $1
+        OR LOWER(TRIM(employee_number)) = $1
       LIMIT 1
       `,
-      [normalizedUsername],
+      [normalizedIdentifier],
     );
 
   if (result.rows.length === 0) {

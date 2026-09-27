@@ -21,7 +21,7 @@
       >
         <div>
           <label class="label">
-            Staff ID
+            Staff ID or username
           </label>
 
           <input
