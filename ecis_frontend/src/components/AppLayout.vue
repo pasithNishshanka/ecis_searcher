@@ -183,6 +183,12 @@ const nav = [
   },
 
   {
+    path: "/dental",
+    label: "Dental Clinic",
+    icon: ClipboardPlus,
+  },
+
+  {
     path: "/wards",
     label: "Wards & Beds",
     icon: BedDouble,

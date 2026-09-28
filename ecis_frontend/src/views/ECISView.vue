@@ -763,6 +763,14 @@
                     />
                   </BaseButton>
                 </RouterLink>
+
+                <BaseButton
+                  v-if="hasDentalEvidence(candidate)"
+                  variant="secondary"
+                  @click="openDentalDetails(candidate)"
+                >
+                  Dental details
+                </BaseButton>
               </div>
             </div>
           </article>
@@ -784,6 +792,74 @@
         </div>
       </main>
     </div>
+
+    <Modal
+      :open="dentalModalOpen"
+      :title="dentalModalTitle"
+      description="Read-only dental records from the selected patient's existing EHR."
+      @close="closeDentalDetails"
+    >
+      <p
+        v-if="dentalDetailsError"
+        class="rounded-xl bg-red-50 p-4 text-sm text-red-700"
+      >
+        {{ dentalDetailsError }}
+      </p>
+
+      <p
+        v-else-if="dentalDetailsLoading"
+        class="py-8 text-center text-sm text-slate-400"
+      >
+        Loading dental records from the EHR...
+      </p>
+
+      <p
+        v-else-if="!dentalRecords.length"
+        class="rounded-xl bg-slate-50 p-4 text-sm text-slate-500"
+      >
+        No dental records were found for this patient.
+      </p>
+
+      <div
+        v-else
+        class="space-y-3"
+      >
+        <article
+          v-for="record in dentalRecords"
+          :key="record.dental_record_id"
+          class="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+        >
+          <div class="flex flex-col justify-between gap-1 sm:flex-row sm:items-start">
+            <div>
+              <h3 class="font-bold text-slate-900">
+                {{ record.tooth_number ? `Tooth ${record.tooth_number}` : "Dental record" }}
+              </h3>
+
+              <p class="mt-1 text-xs text-slate-500">
+                Encounter #{{ dentalValue(record.encounter_id) }}
+              </p>
+            </div>
+
+            <span class="text-xs text-slate-400">
+              {{ formatDentalDate(record.record_date) }}
+            </span>
+          </div>
+
+          <dl class="mt-4 grid gap-2 sm:grid-cols-2">
+            <div
+              v-for="field in dentalFields(record)"
+              :key="field.label"
+              class="rounded-lg bg-white p-2.5"
+            >
+              <dt class="label">{{ field.label }}</dt>
+              <dd class="mt-1 whitespace-pre-line text-xs leading-5 text-slate-600">
+                {{ dentalValue(field.value) }}
+              </dd>
+            </div>
+          </dl>
+        </article>
+      </div>
+    </Modal>
   </div>
 </template>
 
@@ -823,6 +899,9 @@ import BaseSelect
 import StatusBadge
   from "../components/ui/StatusBadge.vue";
 
+import Modal
+  from "../components/Modal.vue";
+
 import FormField
   from "../components/forms/FormField.vue";
 
@@ -831,6 +910,7 @@ import RangeField
 
 
 import {
+  apiGet,
   apiPost,
 } from "../services/api";
 
@@ -931,6 +1011,62 @@ interface BackendCandidate {
 
   fullModelCoveragePercent?: number;
 }
+
+
+interface DentalRecord {
+  dental_record_id: number;
+
+  encounter_id:
+    | number
+    | null;
+
+  record_date:
+    | string
+    | null;
+
+  tooth_number:
+    | string
+    | number
+    | null;
+
+  condition:
+    | string
+    | null;
+
+  treatment:
+    | string
+    | null;
+
+  filling_type:
+    | string
+    | null;
+
+  crown_present:
+    | boolean
+    | null;
+
+  implant_present:
+    | boolean
+    | null;
+
+  missing_tooth:
+    | boolean
+    | null;
+
+  notes:
+    | string
+    | null;
+
+  recorded_by_name:
+    | string
+    | null;
+}
+
+
+type DentalField = {
+  label: string;
+  value: unknown;
+};
 
 
 
@@ -1108,6 +1244,39 @@ const hasSearched =
 
 const sort =
   ref("score");
+
+
+const dentalModalOpen =
+  ref(false);
+
+
+const dentalDetailsLoading =
+  ref(false);
+
+
+const dentalDetailsError =
+  ref("");
+
+
+const dentalCandidate =
+  ref<BackendCandidate | null>(
+    null,
+  );
+
+
+const dentalRecords =
+  ref<DentalRecord[]>([]);
+
+
+const dentalModalTitle =
+  computed(() => {
+    const candidate =
+      dentalCandidate.value;
+
+    return candidate
+      ? `Dental records · ${candidate.name}`
+      : "Dental records";
+  });
 
 
 
@@ -1619,6 +1788,191 @@ async function run() {
     loading.value =
       false;
   }
+}
+
+
+
+/* ============================================================
+   DENTAL RECORDS
+   ============================================================ */
+
+function hasDentalEvidence(
+  candidate: BackendCandidate,
+): boolean {
+  return (
+    candidate.evidence || []
+  ).some(
+    (
+      evidence,
+    ) =>
+      evidence.key ===
+        "dental" ||
+      evidence.sourceTable ===
+        "dental_records",
+  );
+}
+
+
+async function openDentalDetails(
+  candidate: BackendCandidate,
+) {
+  dentalCandidate.value =
+    candidate;
+
+  dentalRecords.value =
+    [];
+
+  dentalDetailsError.value =
+    "";
+
+  dentalModalOpen.value =
+    true;
+
+  dentalDetailsLoading.value =
+    true;
+
+  try {
+    const response =
+      await apiGet<{
+        data?: {
+          evidence?: {
+            dental?: DentalRecord[];
+          };
+        };
+      }>(
+        `/ecis/candidates/${candidate.patientId}/evidence`,
+      );
+
+    const records =
+      response?.data?.evidence?.dental;
+
+    dentalRecords.value =
+      Array.isArray(
+        records,
+      )
+        ? records
+        : [];
+  } catch (
+    err
+  ) {
+    dentalDetailsError.value =
+      err instanceof Error
+        ? err.message
+        : "Unable to load dental records from the EHR.";
+  } finally {
+    dentalDetailsLoading.value =
+      false;
+  }
+}
+
+
+function closeDentalDetails() {
+  dentalModalOpen.value =
+    false;
+
+  dentalCandidate.value =
+    null;
+
+  dentalRecords.value =
+    [];
+
+  dentalDetailsError.value =
+    "";
+}
+
+
+function dentalFields(
+  record: DentalRecord,
+): DentalField[] {
+  return [
+    {
+      label: "Condition",
+      value: record.condition,
+    },
+    {
+      label: "Treatment",
+      value: record.treatment,
+    },
+    {
+      label: "Filling type",
+      value: record.filling_type,
+    },
+    {
+      label: "Crown present",
+      value: record.crown_present,
+    },
+    {
+      label: "Implant present",
+      value: record.implant_present,
+    },
+    {
+      label: "Missing tooth",
+      value: record.missing_tooth,
+    },
+    {
+      label: "Recorded by",
+      value: record.recorded_by_name,
+    },
+    {
+      label: "Notes",
+      value: record.notes,
+    },
+  ];
+}
+
+
+function dentalValue(
+  value: unknown,
+): string {
+  if (
+    value === null ||
+    value === undefined ||
+    value === ""
+  ) {
+    return "Not recorded";
+  }
+
+  if (
+    typeof value ===
+      "boolean"
+  ) {
+    return value
+      ? "Yes"
+      : "No";
+  }
+
+  return String(
+    value,
+  );
+}
+
+
+function formatDentalDate(
+  value: string | null,
+): string {
+  if (!value) {
+    return "Date not recorded";
+  }
+
+  const date =
+    new Date(value);
+
+  if (
+    Number.isNaN(
+      date.getTime(),
+    )
+  ) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat(
+    "en-LK",
+    {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    },
+  ).format(date);
 }
 
 

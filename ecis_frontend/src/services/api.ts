@@ -65,6 +65,29 @@ function getRefreshToken(): string | null {
 }
 
 
+function getActiveHospitalId(): number | null {
+  try {
+    const user = JSON.parse(
+      localStorage.getItem(
+        "ecis-user",
+      ) || "null",
+    );
+
+    const hospitalId = Number(
+      user?.hospitalId,
+    );
+
+    return Number.isInteger(
+      hospitalId,
+    ) && hospitalId > 0
+      ? hospitalId
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+
 function saveAccessToken(
   token: string,
   user?: unknown,
@@ -138,6 +161,9 @@ export async function refreshAccessToken(): Promise<
   }
 
   try {
+    const hospitalId =
+      getActiveHospitalId();
+
     const response =
       await fetch(
         `${API_BASE_URL}/auth/refresh`,
@@ -151,6 +177,7 @@ export async function refreshAccessToken(): Promise<
 
           body: JSON.stringify({
             refreshToken,
+            hospitalId,
           }),
         },
       );
@@ -431,6 +458,40 @@ export function apiPost<T>(
         body,
       ),
     },
+  );
+}
+
+
+/* ============================================================
+   HOSPITAL CONTEXT
+   ============================================================ */
+
+export async function switchHospitalContext(
+  hospitalId: number,
+): Promise<void> {
+  const response =
+    await apiRequest<RefreshResponse>(
+      "/auth/switch-hospital",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          hospitalId,
+        }),
+      },
+    );
+
+  const token =
+    response?.data?.token;
+
+  if (!token) {
+    throw new Error(
+      "The server did not return a hospital-context token.",
+    );
+  }
+
+  saveAccessToken(
+    token,
+    response.data?.user,
   );
 }
 

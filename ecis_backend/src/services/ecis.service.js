@@ -35,6 +35,31 @@ function nullableText(
 }
 
 
+function splitClueTerms(
+  value,
+) {
+  return normalizeText(
+    value,
+  )
+    .split(
+      /[\/,;|]+/,
+    )
+    .map(
+      (
+        term,
+      ) =>
+        term.replace(
+          /\s+/g,
+          " ",
+        )
+          .trim(),
+    )
+    .filter(
+      Boolean,
+    );
+}
+
+
 function toNumberOrNull(
   value,
 ) {
@@ -204,6 +229,11 @@ function calculateAge(
 function normalizeSearchInput(
   input,
 ) {
+  const dental =
+    nullableText(
+      input.dental,
+    );
+
   const ageMin =
     toNumberOrNull(
       input.ageMin,
@@ -329,9 +359,12 @@ function normalizeSearchInput(
         input.device,
       ),
 
-    dental:
-      nullableText(
-        input.dental,
+    dental,
+
+    /* A slash-separated dental clue means all listed terms are required. */
+    dentalTerms:
+      splitClueTerms(
+        dental,
       ),
 
     observation:
@@ -816,25 +849,70 @@ async function searchPatients(
   if (
     input.dental
   ) {
-    addFilter(
+    const dentalTerms =
+      input.dentalTerms.length
+        ? input.dentalTerms
+        : [
+            input.dental,
+          ];
+
+    const dentalText = `
+      LOWER(
+        CONCAT_WS(
+          ' ',
+          dr.condition,
+          dr.treatment,
+          dr.filling_type,
+          CASE
+            WHEN dr.tooth_number IS NOT NULL
+              THEN 'tooth ' || dr.tooth_number
+            ELSE NULL
+          END,
+          CASE
+            WHEN dr.crown_present THEN 'crown'
+            ELSE NULL
+          END,
+          CASE
+            WHEN dr.implant_present THEN 'implant'
+            ELSE NULL
+          END,
+          CASE
+            WHEN dr.missing_tooth THEN 'missing tooth'
+            ELSE NULL
+          END,
+          dr.notes
+        )
+      )
+    `;
+
+    const dentalClauses =
+      dentalTerms.map(
+        (
+          term,
+        ) => {
+          values.push(
+            term,
+          );
+
+          return `
+            ${dentalText} LIKE
+              '%' || LOWER($${values.length}) || '%'
+          `;
+        },
+      );
+
+    where.push(
       `
         EXISTS (
           SELECT 1
           FROM public.dental_records dr
           WHERE
             dr.patient_id = p.patient_id
-            AND LOWER(
-              CONCAT_WS(
-                ' ',
-                dr.condition,
-                dr.treatment,
-                dr.filling_type,
-                dr.tooth_number
-              )
-            ) LIKE '%' || LOWER($VALUE) || '%'
+            AND ${dentalClauses.join(
+              "\nAND ",
+            )}
         )
       `,
-      input.dental,
     );
   }
 
@@ -1115,7 +1193,19 @@ async function searchPatients(
                 dr.treatment,
 
                 'fillingType',
-                dr.filling_type
+                dr.filling_type,
+
+                'crownPresent',
+                dr.crown_present,
+
+                'implantPresent',
+                dr.implant_present,
+
+                'missingTooth',
+                dr.missing_tooth,
+
+                'notes',
+                dr.notes
               )
               ORDER BY
                 dr.record_date DESC
@@ -1812,6 +1902,13 @@ async function searchPatients(
         if (
           input.dental
         ) {
+          const dentalTerms =
+            input.dentalTerms.length
+              ? input.dentalTerms
+              : [
+                  input.dental,
+                ];
+
           const matches =
             (
               row.dental_records ||
@@ -1819,12 +1916,21 @@ async function searchPatients(
             ).filter(
               (
                 dental,
-              ) =>
-                normalizeText(
-                  `${dental.condition || ""} ${dental.treatment || ""} ${dental.fillingType || ""} ${dental.toothNumber || ""}`,
-                ).includes(
-                  input.dental,
-                ),
+              ) => {
+                const dentalText =
+                  normalizeText(
+                    `${dental.condition || ""} ${dental.treatment || ""} ${dental.fillingType || ""} tooth ${dental.toothNumber || ""} ${dental.crownPresent ? "crown" : ""} ${dental.implantPresent ? "implant" : ""} ${dental.missingTooth ? "missing tooth" : ""} ${dental.notes || ""}`,
+                  );
+
+                return dentalTerms.every(
+                  (
+                    term,
+                  ) =>
+                    dentalText.includes(
+                      term,
+                    ),
+                );
+              },
             );
 
           if (
@@ -1848,10 +1954,28 @@ async function searchPatients(
                   .map(
                     (
                       item,
-                    ) =>
-                      item.toothNumber
-                        ? `Tooth ${item.toothNumber}`
-                        : "Dental record",
+                    ) => {
+                      const findings = [
+                        item.crownPresent &&
+                          "crown",
+                        item.implantPresent &&
+                          "implant",
+                        item.missingTooth &&
+                          "missing tooth",
+                      ].filter(
+                        Boolean,
+                      );
+
+                      return item.toothNumber
+                        ? `Tooth ${item.toothNumber}${
+                            findings.length
+                              ? ` (${findings.join(
+                                  ", ",
+                                )})`
+                              : ""
+                          }`
+                        : "Dental record";
+                    },
                   )
                   .join(
                     ", ",

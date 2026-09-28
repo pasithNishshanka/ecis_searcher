@@ -1,6 +1,6 @@
 const bcrypt = require("bcryptjs");
-const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
+const jwt = require("jsonwebtoken");
 
 const pool = require("../config/database");
 
@@ -8,33 +8,42 @@ const ACCESS_TOKEN_EXPIRES_IN =
   process.env.JWT_ACCESS_EXPIRES_IN ||
   "30m";
 
-const REFRESH_TOKEN_EXPIRES_IN_DAYS =
-  Number(
-    process.env.JWT_REFRESH_EXPIRES_IN_DAYS ||
-      7,
-  );
+const REFRESH_TOKEN_EXPIRES_IN_DAYS = Number(
+  process.env.JWT_REFRESH_EXPIRES_IN_DAYS || 7,
+);
 
-function createAccessToken(user) {
+function optionalPositiveInteger(value) {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+
+  const number = Number(value);
+
+  if (!Number.isInteger(number) || number <= 0) {
+    throw new Error("hospitalId must be a positive integer.");
+  }
+
+  return number;
+}
+
+function createAccessToken(user, assignment) {
   if (!process.env.JWT_SECRET) {
-    throw new Error(
-      "JWT_SECRET is not configured in .env",
-    );
+    throw new Error("JWT_SECRET is not configured in .env");
   }
 
   return jwt.sign(
     {
       userId: user.user_id,
-      hospitalId: user.hospital_id,
+      assignmentId: assignment.assignment_id,
+      hospitalId: assignment.hospital_id,
+      hospitalName: assignment.hospital_name,
       username: user.username,
       fullName: user.full_name,
-      role: user.role,
-      department: user.department,
+      role: assignment.role,
+      department: assignment.department || user.department,
     },
     process.env.JWT_SECRET,
-    {
-      expiresIn:
-        ACCESS_TOKEN_EXPIRES_IN,
-    },
+    { expiresIn: ACCESS_TOKEN_EXPIRES_IN },
   );
 }
 
@@ -42,9 +51,7 @@ function createRefreshToken() {
   return crypto.randomBytes(64).toString("hex");
 }
 
-function hashRefreshToken(
-  refreshToken,
-) {
+function hashRefreshToken(refreshToken) {
   return crypto
     .createHash("sha256")
     .update(refreshToken)
@@ -52,38 +59,105 @@ function hashRefreshToken(
 }
 
 function getRefreshExpiryDate() {
-  const expiry =
-    new Date();
-
-  expiry.setDate(
-    expiry.getDate() +
-      REFRESH_TOKEN_EXPIRES_IN_DAYS,
-  );
-
+  const expiry = new Date();
+  expiry.setDate(expiry.getDate() + REFRESH_TOKEN_EXPIRES_IN_DAYS);
   return expiry;
 }
 
-async function login({
-  username,
-  password,
-}) {
-  if (!username || !password) {
-    throw new Error(
-      "Username and password are required.",
-    );
+async function getHospitalAssignments(userId) {
+  const result = await pool.query(
+    `
+      SELECT
+        a.assignment_id,
+        a.hospital_id,
+        h.hospital_name,
+        a.role,
+        a.department,
+        a.designation,
+        a.license_number,
+        a.start_date,
+        a.end_date,
+        a.status
+      FROM public.hospital_user_assignments a
+      INNER JOIN public.hospitals h
+        ON h.hospital_id = a.hospital_id
+       AND h.is_active = TRUE
+      WHERE
+        a.user_id = $1
+        AND a.status = 'ACTIVE'
+        AND a.start_date <= CURRENT_DATE
+        AND (a.end_date IS NULL OR a.end_date >= CURRENT_DATE)
+      ORDER BY a.hospital_id, a.assignment_id;
+    `,
+    [userId],
+  );
+
+  return result.rows;
+}
+
+async function resolveHospitalAssignment(userId, requestedHospitalId) {
+  const assignments = await getHospitalAssignments(userId);
+
+  if (assignments.length === 0) {
+    throw new Error("No active hospital assignment is available for this user.");
   }
 
-  const normalizedIdentifier =
-    String(username)
-      .trim()
-      .toLowerCase();
+  const hospitalId = optionalPositiveInteger(requestedHospitalId);
 
-  const result =
-    await pool.query(
-      `
+  const assignment = hospitalId
+    ? assignments.find((item) => Number(item.hospital_id) === hospitalId)
+    : assignments[0];
+
+  if (!assignment) {
+    throw new Error("The selected hospital is not assigned to this user.");
+  }
+
+  return {
+    assignment,
+    assignments,
+  };
+}
+
+function assignmentResponse(assignment) {
+  return {
+    assignmentId: assignment.assignment_id,
+    hospitalId: assignment.hospital_id,
+    hospitalName: assignment.hospital_name,
+    role: assignment.role,
+    department: assignment.department,
+    designation: assignment.designation,
+    licenseNumber: assignment.license_number,
+  };
+}
+
+function authenticatedUserResponse(user, assignment, assignments) {
+  return {
+    userId: user.user_id,
+    hospitalId: assignment.hospital_id,
+    hospitalName: assignment.hospital_name,
+    assignmentId: assignment.assignment_id,
+    employeeNumber: user.employee_number,
+    fullName: user.full_name,
+    username: user.username,
+    role: assignment.role,
+    department: assignment.department || user.department,
+    phone: user.phone,
+    email: user.email,
+    hospitalAssignments: assignments.map(assignmentResponse),
+  };
+}
+
+async function findActiveUserByIdentifier(username) {
+  const identifier = String(username || "").trim().toLowerCase();
+
+  if (!identifier) {
+    throw new Error("Username and password are required.");
+  }
+
+  const result = await pool.query(
+    `
       SELECT
         user_id,
-        hospital_id,
         employee_number,
         full_name,
         username,
@@ -97,172 +171,140 @@ async function login({
       WHERE
         LOWER(TRIM(username)) = $1
         OR LOWER(TRIM(employee_number)) = $1
-      LIMIT 1
-      `,
-      [normalizedIdentifier],
-    );
+      LIMIT 1;
+    `,
+    [identifier],
+  );
 
-  if (result.rows.length === 0) {
-    throw new Error(
-      "Invalid username or password.",
-    );
+  if (result.rowCount === 0) {
+    throw new Error("Invalid username or password.");
   }
 
-  const user =
-    result.rows[0];
+  const user = result.rows[0];
 
   if (!user.is_active) {
-    throw new Error(
-      "This user account is inactive.",
-    );
+    throw new Error("This user account is inactive.");
   }
 
   if (!user.password_hash) {
-    throw new Error(
-      "User password has not been configured.",
-    );
+    throw new Error("User password has not been configured.");
   }
 
-  const passwordMatches =
-    await bcrypt.compare(
-      password,
-      user.password_hash,
-    );
+  return user;
+}
+
+async function findActiveUserById(userId) {
+  const result = await pool.query(
+    `
+      SELECT
+        user_id,
+        employee_number,
+        full_name,
+        username,
+        role,
+        department,
+        phone,
+        email,
+        is_active
+      FROM public.hospital_users
+      WHERE user_id = $1
+      LIMIT 1;
+    `,
+    [userId],
+  );
+
+  if (result.rowCount === 0 || !result.rows[0].is_active) {
+    throw new Error("This user account is inactive.");
+  }
+
+  return result.rows[0];
+}
+
+async function buildAuthenticatedContext(user, hospitalId) {
+  const { assignment, assignments } = await resolveHospitalAssignment(
+    user.user_id,
+    hospitalId,
+  );
+
+  return {
+    token: createAccessToken(user, assignment),
+    user: authenticatedUserResponse(user, assignment, assignments),
+  };
+}
+
+async function login({ username, password, hospitalId }) {
+  if (!username || !password) {
+    throw new Error("Username and password are required.");
+  }
+
+  const user = await findActiveUserByIdentifier(username);
+  const passwordMatches = await bcrypt.compare(password, user.password_hash);
 
   if (!passwordMatches) {
-    throw new Error(
-      "Invalid username or password.",
-    );
+    throw new Error("Invalid username or password.");
   }
 
-  const accessToken =
-    createAccessToken(user);
+  const context = await buildAuthenticatedContext(user, hospitalId);
+  const refreshToken = createRefreshToken();
 
-  const refreshToken =
-    createRefreshToken();
-
-  const refreshTokenHash =
-    hashRefreshToken(
-      refreshToken,
-    );
-
-  const refreshExpiresAt =
-    getRefreshExpiryDate();
-
-  /*
-   * Remove old expired/revoked refresh sessions
-   * belonging to this user.
-   */
   await pool.query(
     `
-    DELETE FROM auth_refresh_tokens
-    WHERE
-      user_id = $1
-      AND (
-        expires_at <= CURRENT_TIMESTAMP
-        OR revoked_at IS NOT NULL
-      )
+      DELETE FROM public.auth_refresh_tokens
+      WHERE
+        user_id = $1
+        AND (
+          expires_at <= CURRENT_TIMESTAMP
+          OR revoked_at IS NOT NULL
+        );
     `,
     [user.user_id],
   );
 
   await pool.query(
     `
-    INSERT INTO auth_refresh_tokens (
-      user_id,
-      token_hash,
-      expires_at
-    )
-    VALUES (
-      $1,
-      $2,
-      $3
-    )
+      INSERT INTO public.auth_refresh_tokens (
+        user_id,
+        token_hash,
+        expires_at
+      )
+      VALUES ($1, $2, $3);
     `,
     [
       user.user_id,
-      refreshTokenHash,
-      refreshExpiresAt,
+      hashRefreshToken(refreshToken),
+      getRefreshExpiryDate(),
     ],
   );
 
   await pool.query(
     `
-    UPDATE public.hospital_users
-    SET
-      last_login_at =
-        CURRENT_TIMESTAMP,
-      updated_at =
-        CURRENT_TIMESTAMP
-    WHERE user_id = $1
+      UPDATE public.hospital_users
+      SET
+        last_login_at = CURRENT_TIMESTAMP,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE user_id = $1;
     `,
     [user.user_id],
   );
 
   return {
-    token: accessToken,
-
+    ...context,
     refreshToken,
-
-    user: {
-      userId:
-        user.user_id,
-
-      hospitalId:
-        user.hospital_id,
-
-      employeeNumber:
-        user.employee_number,
-
-      fullName:
-        user.full_name,
-
-      username:
-        user.username,
-
-      role:
-        user.role,
-
-      department:
-        user.department,
-
-      phone:
-        user.phone,
-
-      email:
-        user.email,
-    },
   };
 }
 
-async function refreshAccessToken(
-  refreshToken,
-) {
-  if (
-    !refreshToken ||
-    typeof refreshToken !==
-      "string"
-  ) {
-    throw new Error(
-      "Refresh token is required.",
-    );
+async function refreshAccessToken(refreshToken, hospitalId) {
+  if (!refreshToken || typeof refreshToken !== "string") {
+    throw new Error("Refresh token is required.");
   }
 
-  const tokenHash =
-    hashRefreshToken(
-      refreshToken,
-    );
-
-  const result =
-    await pool.query(
-      `
+  const result = await pool.query(
+    `
       SELECT
         rt.refresh_token_id,
         rt.user_id,
         rt.expires_at,
         rt.revoked_at,
-
-        u.hospital_id,
         u.employee_number,
         u.full_name,
         u.username,
@@ -271,153 +313,81 @@ async function refreshAccessToken(
         u.phone,
         u.email,
         u.is_active
+      FROM public.auth_refresh_tokens rt
+      INNER JOIN public.hospital_users u
+        ON u.user_id = rt.user_id
+      WHERE rt.token_hash = $1
+      LIMIT 1;
+    `,
+    [hashRefreshToken(refreshToken)],
+  );
 
-      FROM auth_refresh_tokens rt
-
-      INNER JOIN hospital_users u
-        ON u.user_id =
-          rt.user_id
-
-      WHERE
-        rt.token_hash = $1
-
-      LIMIT 1
-      `,
-      [tokenHash],
-    );
-
-  if (result.rows.length === 0) {
-    throw new Error(
-      "Refresh session is invalid.",
-    );
+  if (result.rowCount === 0) {
+    throw new Error("Refresh session is invalid.");
   }
 
-  const session =
-    result.rows[0];
+  const session = result.rows[0];
 
   if (session.revoked_at) {
-    throw new Error(
-      "Refresh session has been revoked.",
-    );
+    throw new Error("Refresh session has been revoked.");
   }
 
-  if (
-    new Date(
-      session.expires_at,
-    ).getTime() <= Date.now()
-  ) {
+  if (new Date(session.expires_at).getTime() <= Date.now()) {
     await pool.query(
       `
-      UPDATE auth_refresh_tokens
-      SET
-        revoked_at =
-          CURRENT_TIMESTAMP
-      WHERE
-        refresh_token_id = $1
+        UPDATE public.auth_refresh_tokens
+        SET revoked_at = CURRENT_TIMESTAMP
+        WHERE refresh_token_id = $1;
       `,
-      [
-        session.refresh_token_id,
-      ],
+      [session.refresh_token_id],
     );
 
-    throw new Error(
-      "Refresh session has expired.",
-    );
+    throw new Error("Refresh session has expired.");
   }
 
   if (!session.is_active) {
-    throw new Error(
-      "This user account is inactive.",
-    );
+    throw new Error("This user account is inactive.");
   }
 
-  const accessToken =
-    createAccessToken({
-      user_id:
-        session.user_id,
-
-      hospital_id:
-        session.hospital_id,
-
-      username:
-        session.username,
-
-      full_name:
-        session.full_name,
-
-      role:
-        session.role,
-
-      department:
-        session.department,
-    });
-
-  return {
-    token: accessToken,
-
-    user: {
-      userId:
-        session.user_id,
-
-      hospitalId:
-        session.hospital_id,
-
-      employeeNumber:
-        session.employee_number,
-
-      fullName:
-        session.full_name,
-
-      username:
-        session.username,
-
-      role:
-        session.role,
-
-      department:
-        session.department,
-
-      phone:
-        session.phone,
-
-      email:
-        session.email,
-    },
-  };
+  return buildAuthenticatedContext(session, hospitalId);
 }
 
-async function logout(
-  refreshToken,
-) {
-  if (
-    !refreshToken ||
-    typeof refreshToken !==
-      "string"
-  ) {
+async function switchHospitalContext({ userId, hospitalId }) {
+  const user = await findActiveUserById(userId);
+  return buildAuthenticatedContext(user, hospitalId);
+}
+
+async function getHospitalContext({ userId, hospitalId }) {
+  const user = await findActiveUserById(userId);
+  const { assignment, assignments } = await resolveHospitalAssignment(
+    user.user_id,
+    hospitalId,
+  );
+
+  return authenticatedUserResponse(user, assignment, assignments);
+}
+
+async function logout(refreshToken) {
+  if (!refreshToken || typeof refreshToken !== "string") {
     return;
   }
 
-  const tokenHash =
-    hashRefreshToken(
-      refreshToken,
-    );
-
   await pool.query(
     `
-    UPDATE auth_refresh_tokens
-    SET
-      revoked_at =
-        CURRENT_TIMESTAMP
-    WHERE
-      token_hash = $1
-      AND revoked_at IS NULL
+      UPDATE public.auth_refresh_tokens
+      SET revoked_at = CURRENT_TIMESTAMP
+      WHERE
+        token_hash = $1
+        AND revoked_at IS NULL;
     `,
-    [tokenHash],
+    [hashRefreshToken(refreshToken)],
   );
 }
 
 module.exports = {
   login,
   refreshAccessToken,
+  switchHospitalContext,
+  getHospitalContext,
   logout,
 };

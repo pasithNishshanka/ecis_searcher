@@ -8,9 +8,20 @@ const {
   '../controllers/dentalRecord.controller'
 );
 
+const {
+  authorizeRoles,
+} = require(
+  '../middleware/authorization.middleware'
+);
+
 const router = express.Router();
 
-router.post('/', createDentalRecord);
+/* Only a clinical user can record a dental consultation. */
+router.post(
+  '/',
+  authorizeRoles('DOCTOR'),
+  createDentalRecord,
+);
 
 router.get(
   '/patient/:patientId',
