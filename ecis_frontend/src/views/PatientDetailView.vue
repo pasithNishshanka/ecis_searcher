@@ -293,7 +293,7 @@
             variant="secondary"
             block
           >
-            Open AI summary
+            Open EHR summary
           </BaseButton>
         </RouterLink>
       </aside>

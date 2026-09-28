@@ -1,6 +1,6 @@
 <template>
     <div class="space-y-6">
-        <PageHeader eyebrow="Clinical intelligence" title="Medical Records & AI Summary"
+        <PageHeader eyebrow="Clinical intelligence" title="Medical Records & EHR Summary"
             description="Review the selected patient's complete longitudinal EHR across encounters, admissions, BHT, investigations, medication, surgery, procedures and other clinical evidence.">
             <div class="flex flex-wrap gap-2">
                 <BaseButton variant="secondary" :loading="loading" @click="reload">
@@ -16,7 +16,7 @@
                     {{
                         generating
                             ? "Generating..."
-                            : "Generate AI Summary"
+                            : "Generate EHR Summary"
                     }}
                 </BaseButton>
             </div>
@@ -561,7 +561,7 @@ line in eventDetailLines(event)
                 " @click="
                 generateSummary
             ">
-                            Generate AI Summary
+                            Generate EHR Summary
                         </BaseButton>
                     </div>
                 </section>
