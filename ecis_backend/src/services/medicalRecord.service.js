@@ -190,7 +190,14 @@ async function getMedicalRecord(
         WHERE
           p.patient_id = $1
 
-          AND p.hospital_id = $2
+          AND EXISTS (
+            SELECT 1
+            FROM public.patient_hospital_registrations phr
+            WHERE
+              phr.patient_id = p.patient_id
+              AND phr.hospital_id = $2
+              AND phr.status = 'ACTIVE'
+          )
 
           AND p.status = 'ACTIVE'
 
@@ -640,7 +647,14 @@ async function getMedicalRecord(
           INNER JOIN public.patients p
             ON p.patient_id =
                t.patient_id
-           AND p.hospital_id = $2
+            AND EXISTS (
+              SELECT 1
+              FROM public.patient_hospital_registrations phr
+              WHERE
+                phr.patient_id = p.patient_id
+                AND phr.hospital_id = $2
+                AND phr.status = 'ACTIVE'
+            )
 
           LEFT JOIN public.hospital_users u
             ON u.user_id =
@@ -718,7 +732,14 @@ async function getMedicalRecord(
           INNER JOIN public.patients p
             ON p.patient_id =
                i.patient_id
-           AND p.hospital_id = $2
+            AND EXISTS (
+              SELECT 1
+              FROM public.patient_hospital_registrations phr
+              WHERE
+                phr.patient_id = p.patient_id
+                AND phr.hospital_id = $2
+                AND phr.status = 'ACTIVE'
+            )
 
           LEFT JOIN public.encounters e
             ON e.encounter_id =
@@ -860,7 +881,14 @@ async function getMedicalRecord(
           INNER JOIN public.patients p
             ON p.patient_id =
                s.patient_id
-           AND p.hospital_id = $2
+            AND EXISTS (
+              SELECT 1
+              FROM public.patient_hospital_registrations phr
+              WHERE
+                phr.patient_id = p.patient_id
+                AND phr.hospital_id = $2
+                AND phr.status = 'ACTIVE'
+            )
 
           LEFT JOIN public.hospital_users u
             ON u.user_id =
@@ -928,7 +956,14 @@ async function getMedicalRecord(
           INNER JOIN public.patients p
             ON p.patient_id =
                pr.patient_id
-           AND p.hospital_id = $2
+            AND EXISTS (
+              SELECT 1
+              FROM public.patient_hospital_registrations phr
+              WHERE
+                phr.patient_id = p.patient_id
+                AND phr.hospital_id = $2
+                AND phr.status = 'ACTIVE'
+            )
 
           LEFT JOIN public.hospital_users u
             ON u.user_id =
@@ -982,7 +1017,14 @@ async function getMedicalRecord(
           INNER JOIN public.patients p
             ON p.patient_id =
                f.patient_id
-           AND p.hospital_id = $2
+            AND EXISTS (
+              SELECT 1
+              FROM public.patient_hospital_registrations phr
+              WHERE
+                phr.patient_id = p.patient_id
+                AND phr.hospital_id = $2
+                AND phr.status = 'ACTIVE'
+            )
 
           LEFT JOIN public.encounters e
             ON e.encounter_id =
@@ -1034,7 +1076,14 @@ async function getMedicalRecord(
           INNER JOIN public.patients p
             ON p.patient_id =
                co.patient_id
-           AND p.hospital_id = $2
+            AND EXISTS (
+              SELECT 1
+              FROM public.patient_hospital_registrations phr
+              WHERE
+                phr.patient_id = p.patient_id
+                AND phr.hospital_id = $2
+                AND phr.status = 'ACTIVE'
+            )
 
           LEFT JOIN public.hospital_users u
             ON u.user_id =
@@ -1090,7 +1139,14 @@ async function getMedicalRecord(
           INNER JOIN public.patients p
             ON p.patient_id =
                pc.patient_id
-           AND p.hospital_id = $2
+            AND EXISTS (
+              SELECT 1
+              FROM public.patient_hospital_registrations phr
+              WHERE
+                phr.patient_id = p.patient_id
+                AND phr.hospital_id = $2
+                AND phr.status = 'ACTIVE'
+            )
 
           LEFT JOIN public.encounters e
             ON e.encounter_id =
@@ -1144,7 +1200,14 @@ async function getMedicalRecord(
           INNER JOIN public.patients p
             ON p.patient_id =
                d.patient_id
-           AND p.hospital_id = $2
+            AND EXISTS (
+              SELECT 1
+              FROM public.patient_hospital_registrations phr
+              WHERE
+                phr.patient_id = p.patient_id
+                AND phr.hospital_id = $2
+                AND phr.status = 'ACTIVE'
+            )
 
           LEFT JOIN public.hospital_users u
             ON u.user_id =
@@ -1202,7 +1265,14 @@ async function getMedicalRecord(
           INNER JOIN public.patients p
             ON p.patient_id =
                md.patient_id
-           AND p.hospital_id = $2
+            AND EXISTS (
+              SELECT 1
+              FROM public.patient_hospital_registrations phr
+              WHERE
+                phr.patient_id = p.patient_id
+                AND phr.hospital_id = $2
+                AND phr.status = 'ACTIVE'
+            )
 
           LEFT JOIN public.encounters e
             ON e.encounter_id =

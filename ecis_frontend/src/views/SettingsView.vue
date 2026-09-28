@@ -74,6 +74,13 @@
             <p class="mt-2 text-xs text-slate-500">
               A hospital switch replaces the access token and reloads clinical data for the selected authorized hospital.
             </p>
+
+            <p
+              v-if="context.hospitalAssignments.length < 2"
+              class="mt-2 rounded-lg bg-amber-50 p-3 text-xs text-amber-800"
+            >
+              Switching is unavailable because this user has only one active hospital assignment. A system administrator must add another authorized assignment first.
+            </p>
           </div>
 
           <dl class="grid gap-3 sm:grid-cols-2">

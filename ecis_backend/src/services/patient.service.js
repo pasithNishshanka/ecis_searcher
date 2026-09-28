@@ -788,6 +788,35 @@ async function createPatient(
         .patient_id;
 
 
+    /*
+     * The central patient is registered at the authenticated hospital.
+     * The registration grants this hospital access without creating a
+     * second patient identity or duplicate demographics.
+     */
+    await client.query(
+      `
+        INSERT INTO public.patient_hospital_registrations (
+          patient_id,
+          hospital_id,
+          hospital_patient_number,
+          status,
+          registered_by
+        )
+        VALUES ($1, $2, $3, 'ACTIVE', $4);
+      `,
+      [
+        patientId,
+        hospitalId,
+        patientNumber,
+        Number.isInteger(
+          Number(data.registeredBy),
+        )
+          ? Number(data.registeredBy)
+          : null,
+      ],
+    );
+
+
     await saveAllergies(
       client,
       patientId,
@@ -855,8 +884,16 @@ async function getPatientById(
       ),
     );
 
-    where +=
-      " AND p.hospital_id = $2";
+    where += `
+      AND EXISTS (
+        SELECT 1
+        FROM public.patient_hospital_registrations phr
+        WHERE
+          phr.patient_id = p.patient_id
+          AND phr.hospital_id = $2
+          AND phr.status = 'ACTIVE'
+      )
+    `;
   }
 
 
@@ -906,8 +943,10 @@ async function getAllPatients(
           ON h.hospital_id =
              p.hospital_id
 
-        WHERE
-          p.hospital_id = $1
+        INNER JOIN public.patient_hospital_registrations phr
+          ON phr.patient_id = p.patient_id
+         AND phr.hospital_id = $1
+         AND phr.status = 'ACTIVE'
 
         ORDER BY
           p.created_at DESC,
@@ -951,10 +990,13 @@ async function searchPatients(
           ON h.hospital_id =
              p.hospital_id
 
-        WHERE
-          p.hospital_id = $1
+        INNER JOIN public.patient_hospital_registrations phr
+          ON phr.patient_id = p.patient_id
+         AND phr.hospital_id = $1
+         AND phr.status = 'ACTIVE'
 
-          AND (
+        WHERE
+          (
             p.patient_number ILIKE $2
 
             OR p.first_name ILIKE $2
@@ -1039,7 +1081,14 @@ async function updatePatient(
           FROM public.patients
           WHERE
             patient_id = $1
-            AND hospital_id = $2
+            AND EXISTS (
+              SELECT 1
+              FROM public.patient_hospital_registrations phr
+              WHERE
+                phr.patient_id = patients.patient_id
+                AND phr.hospital_id = $2
+                AND phr.status = 'ACTIVE'
+            )
           FOR UPDATE;
         `,
         [
@@ -1524,7 +1573,14 @@ async function updatePatient(
               )}
             WHERE
               patient_id = $${values.length + 1}
-              AND hospital_id = $${values.length + 2}
+              AND EXISTS (
+                SELECT 1
+                FROM public.patient_hospital_registrations phr
+                WHERE
+                  phr.patient_id = patients.patient_id
+                  AND phr.hospital_id = $${values.length + 2}
+                  AND phr.status = 'ACTIVE'
+              )
             RETURNING patient_id;
           `,
           [
@@ -1597,10 +1653,187 @@ async function updatePatient(
 }
 
 
+/*
+ * ============================================================
+ * REGISTER CENTRAL PATIENT AT HOSPITAL
+ * ============================================================
+ */
+
+async function registerPatientAtHospital(
+  patientIdValue,
+  hospitalIdValue,
+  registeredByValue,
+) {
+  const patientId = Number(patientIdValue);
+  const hospitalId = Number(hospitalIdValue);
+  const registeredBy = Number(registeredByValue);
+
+  if (!Number.isInteger(patientId) || patientId <= 0) {
+    throw new Error("A valid patient ID is required.");
+  }
+
+  if (!Number.isInteger(hospitalId) || hospitalId <= 0) {
+    throw new Error("Authenticated hospital information is required.");
+  }
+
+  if (!Number.isInteger(registeredBy) || registeredBy <= 0) {
+    throw new Error("Authenticated user information is required.");
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const patientResult = await client.query(
+      `
+        SELECT patient_id, patient_number, status
+        FROM public.patients
+        WHERE patient_id = $1
+        FOR SHARE;
+      `,
+      [patientId],
+    );
+
+    if (patientResult.rowCount === 0) {
+      throw new Error("Central patient was not found.");
+    }
+
+    const hospitalResult = await client.query(
+      `
+        SELECT hospital_id
+        FROM public.hospitals
+        WHERE
+          hospital_id = $1
+          AND is_active = TRUE
+        FOR SHARE;
+      `,
+      [hospitalId],
+    );
+
+    if (hospitalResult.rowCount === 0) {
+      throw new Error("Authenticated hospital is not active.");
+    }
+
+    const assignmentResult = await client.query(
+      `
+        SELECT assignment_id
+        FROM public.hospital_user_assignments
+        WHERE
+          user_id = $1
+          AND hospital_id = $2
+          AND status = 'ACTIVE'
+          AND start_date <= CURRENT_DATE
+          AND (end_date IS NULL OR end_date >= CURRENT_DATE)
+        FOR SHARE;
+      `,
+      [registeredBy, hospitalId],
+    );
+
+    if (assignmentResult.rowCount === 0) {
+      throw new Error("User is not assigned to the authenticated hospital.");
+    }
+
+    const patient = patientResult.rows[0];
+
+    await client.query(
+      `
+        INSERT INTO public.patient_hospital_registrations (
+          patient_id,
+          hospital_id,
+          hospital_patient_number,
+          status,
+          registered_by,
+          registered_at,
+          updated_at
+        )
+        VALUES ($1, $2, $3, 'ACTIVE', $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ON CONFLICT (patient_id, hospital_id)
+        DO UPDATE SET
+          status = 'ACTIVE',
+          registered_by = EXCLUDED.registered_by,
+          updated_at = CURRENT_TIMESTAMP;
+      `,
+      [
+        patient.patient_id,
+        hospitalId,
+        patient.patient_number,
+        registeredBy,
+      ],
+    );
+
+    await client.query("COMMIT");
+
+    return getPatientById(patientId, hospitalId);
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+
+/*
+ * ============================================================
+ * CENTRAL PATIENT IDENTITY SEARCH
+ * ============================================================
+ *
+ * This intentionally returns only the minimum demographic identifiers
+ * required to locate and register an existing central patient. It does
+ * not expose clinical history; that remains available only after the
+ * hospital registration/access check succeeds.
+ */
+
+async function searchCentralPatients(searchTerm) {
+  const term = String(searchTerm || "").trim();
+
+  if (!term) {
+    throw new Error("Search query is required.");
+  }
+
+  const result = await pool.query(
+    `
+      SELECT
+        p.patient_id,
+        p.patient_number,
+        p.nic_number,
+        p.passport_number,
+        p.first_name,
+        p.middle_name,
+        p.last_name,
+        p.date_of_birth,
+        p.gender,
+        p.primary_phone,
+        p.status
+      FROM public.patients p
+      WHERE
+        p.status = 'ACTIVE'
+        AND (
+          p.patient_number ILIKE $1
+          OR p.nic_number ILIKE $1
+          OR p.passport_number ILIKE $1
+          OR p.first_name ILIKE $1
+          OR p.middle_name ILIKE $1
+          OR p.last_name ILIKE $1
+          OR p.primary_phone ILIKE $1
+        )
+      ORDER BY p.first_name, p.last_name, p.patient_id
+      LIMIT 25;
+    `,
+    [`%${term}%`],
+  );
+
+  return result.rows;
+}
+
+
 module.exports = {
   createPatient,
   getPatientById,
   getAllPatients,
   searchPatients,
   updatePatient,
+  registerPatientAtHospital,
+  searchCentralPatients,
 };
