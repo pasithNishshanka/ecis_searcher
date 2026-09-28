@@ -18,6 +18,8 @@ const { getStoragePath } = require("../src/middleware/radiologyUpload.middleware
 
 const PATIENT_PATTERN = "^P[0-9]{6}$";
 const EXPECTED_PATIENT_COUNT = 2000;
+const DEMO_WARD_CODES = ["WARD-1789995797575", "ECIS-W01", "ECIS-W02"];
+const DEMO_CLINIC_CODES = ["ECIS-ORTHO", "ECIS-MED"];
 
 const PATIENT_LINKED_TABLES = [
   "admissions",
@@ -68,6 +70,11 @@ async function removeGeneratedTrainingData() {
     transactionOpen = true;
 
     await client.query("SELECT pg_advisory_xact_lock(9130472);");
+
+    const databaseName = await client.query("SELECT current_database() AS name;");
+    if (databaseName.rows[0].name !== "ecis_ehr") {
+      throw new Error("Safety stop: cleanup is restricted to the local ecis_ehr development database.");
+    }
 
     const patientSummary = await client.query(
       `
@@ -164,7 +171,47 @@ async function removeGeneratedTrainingData() {
       FROM public.admissions a
       INNER JOIN cleanup_demo_patients p USING (patient_id)
       WHERE a.status = 'ADMITTED' AND bed_id IS NOT NULL;
+
+      CREATE TEMP TABLE cleanup_demo_master_wards (
+        ward_id BIGINT PRIMARY KEY
+      ) ON COMMIT DROP;
     `);
+
+    await client.query(
+      `
+        INSERT INTO cleanup_demo_master_wards (ward_id)
+        SELECT ward_id
+        FROM public.wards
+        WHERE ward_code = ANY($1);
+      `,
+      [DEMO_WARD_CODES],
+    );
+
+    const wardReferences = await client.query(
+      `
+        SELECT
+          (SELECT COUNT(*)::int FROM public.admissions a INNER JOIN cleanup_demo_master_wards w USING (ward_id)) AS admissions,
+          (SELECT COUNT(*)::int FROM public.emergency_case_locations l INNER JOIN public.beds b USING (bed_id) INNER JOIN cleanup_demo_master_wards w USING (ward_id)) AS emergency_locations;
+      `,
+    );
+
+    if (wardReferences.rows[0].admissions || wardReferences.rows[0].emergency_locations) {
+      throw new Error("Safety stop: demo-labelled wards still have clinical or emergency location links.");
+    }
+
+    const clinicReferences = await client.query(
+      `
+        SELECT COUNT(*)::int AS count
+        FROM public.clinic_visits cv
+        INNER JOIN public.clinics c USING (clinic_id)
+        WHERE c.clinic_code = ANY($1);
+      `,
+      [DEMO_CLINIC_CODES],
+    );
+
+    if (clinicReferences.rows[0].count) {
+      throw new Error("Safety stop: demo-labelled clinics still have clinical visit links.");
+    }
 
     const imageResult = await client.query(
       `
@@ -311,6 +358,26 @@ async function removeGeneratedTrainingData() {
     `);
     deleted.demo_beds_released = releasedBeds.rowCount;
 
+    const demoFixtureBeds = await client.query(`
+      DELETE FROM public.beds b
+      USING cleanup_demo_master_wards target
+      WHERE b.ward_id = target.ward_id;
+    `);
+    deleted.demo_fixture_beds = demoFixtureBeds.rowCount;
+
+    const demoFixtureWards = await client.query(`
+      DELETE FROM public.wards w
+      USING cleanup_demo_master_wards target
+      WHERE w.ward_id = target.ward_id;
+    `);
+    deleted.demo_fixture_wards = demoFixtureWards.rowCount;
+
+    const demoFixtureClinics = await client.query(
+      "DELETE FROM public.clinics WHERE clinic_code = ANY($1);",
+      [DEMO_CLINIC_CODES],
+    );
+    deleted.demo_fixture_clinics = demoFixtureClinics.rowCount;
+
     const remainingPatients = await client.query(
       "SELECT COUNT(*)::int AS count FROM public.patients WHERE patient_number ~ $1;",
       [PATIENT_PATTERN],
@@ -338,7 +405,7 @@ async function removeGeneratedTrainingData() {
       generatedPatientsRemoved: EXPECTED_PATIENT_COUNT,
       radiologyFilesRemoved: fileCleanup.filter((item) => item.removed).length,
       radiologyFileCleanupErrors: fileCleanup.filter((item) => !item.removed),
-      preserved: ["hospitals", "hospital_users", "hospital_user_assignments", "wards", "beds not linked to active demo admissions", "clinics", "allergy and condition lookup tables"],
+      preserved: ["hospital and staff accounts", "general ward/bed/clinic configuration", "allergy and condition lookup tables"],
     }, null, 2));
   } catch (error) {
     if (transactionOpen) {

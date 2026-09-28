@@ -471,7 +471,7 @@ line in eventDetailLines(event)
 
 
                 <!-- ==================================================
-             AI SUMMARY
+             EHR SUMMARY
              ================================================== -->
 
                 <section class="card overflow-hidden">
@@ -484,7 +484,7 @@ line in eventDetailLines(event)
                                 </span>
 
                                 <h2 class="section-title">
-                                    AI Clinical Summary
+                                    Clinical History Summary
                                 </h2>
                             </div>
 
