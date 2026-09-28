@@ -510,11 +510,11 @@ line in eventDetailLines(event)
                             class="rounded-xl border border-teal-100 bg-white p-5 text-sm leading-7 text-slate-700 shadow-sm">
                             <div class="mb-3 flex items-center gap-2">
                                 <span class="badge bg-teal-100 text-teal-800">
-                                    AI SUMMARY
+                                    EHR SUMMARY
                                 </span>
 
                                 <span class="text-xs text-slate-400">
-                                    Structured demo generation
+                                    Generated from recorded EHR events
                                 </span>
                             </div>
 

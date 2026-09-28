@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "nodemon src/server.js"
+    "dev": "nodemon src/server.js",
+    "provision:system-admin": "node scripts/provisionSystemAdmin.js"
   },
   "keywords": [],
   "author": "",

@@ -1,7 +1,7 @@
 <template>
     <div>
-        <PageHeader eyebrow="Hospital overview" title="Good morning, Clinical Staff"
-            description="A complete frontend demonstration of the ECIS research workflow.">
+        <PageHeader eyebrow="Hospital overview" title="Hospital overview"
+            description="Operational records and activity loaded for the selected hospital.">
             <RouterLink to="/ecis">
                 <BaseButton>
                     <template #icon>

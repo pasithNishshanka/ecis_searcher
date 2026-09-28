@@ -81,6 +81,9 @@ const radiologyRoutes =
 const medicalRecordRoutes =
   require("./routes/medicalRecord.routes");
 
+const administrationRoutes =
+  require("./routes/administration.routes");
+
 
 /* ============================================================
    MIDDLEWARE
@@ -409,6 +412,16 @@ app.use(
 app.use(
   "/api/medical-records",
   medicalRecordRoutes,
+);
+
+
+/* ============================================================
+   HOSPITAL AND STAFF ADMINISTRATION
+   ============================================================ */
+
+app.use(
+  "/api/administration",
+  administrationRoutes,
 );
 
 
