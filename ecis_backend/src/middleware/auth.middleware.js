@@ -1,6 +1,7 @@
 const jwt = require("jsonwebtoken");
+const pool = require("../config/database");
 
-function authenticate(req, res, next) {
+async function authenticate(req, res, next) {
   try {
     const authorization =
       req.headers.authorization || "";
@@ -59,12 +60,19 @@ function authenticate(req, res, next) {
     const hospitalId = Number(
       decoded.hospitalId,
     );
+    const role = String(
+      decoded.role || "",
+    ).trim().toUpperCase();
+    const assignmentId = Number(
+      decoded.assignmentId,
+    );
 
     if (
       !Number.isInteger(userId) ||
       userId <= 0 ||
       !Number.isInteger(hospitalId) ||
-      hospitalId <= 0
+      hospitalId <= 0 ||
+      !role
     ) {
       console.warn(
         "Authentication middleware: JWT missing valid user/hospital claims.",
@@ -78,17 +86,60 @@ function authenticate(req, res, next) {
       });
     }
 
+    const activeContext = await pool.query(
+      `
+        SELECT
+          u.username,
+          u.full_name,
+          a.assignment_id,
+          a.role,
+          a.department
+        FROM public.hospital_users u
+        INNER JOIN public.hospital_user_assignments a
+          ON a.user_id = u.user_id
+         AND a.hospital_id = $2
+        INNER JOIN public.hospitals h
+          ON h.hospital_id = a.hospital_id
+        WHERE
+          u.user_id = $1
+          AND u.is_active = TRUE
+          AND h.is_active = TRUE
+          AND a.status = 'ACTIVE'
+          AND a.start_date <= CURRENT_DATE
+          AND (a.end_date IS NULL OR a.end_date >= CURRENT_DATE)
+          AND UPPER(a.role) = $4
+          AND ($3::BIGINT IS NULL OR a.assignment_id = $3)
+        LIMIT 1;
+      `,
+      [
+        userId,
+        hospitalId,
+        Number.isInteger(assignmentId) && assignmentId > 0
+          ? assignmentId
+          : null,
+        role,
+      ],
+    );
+
+    if (activeContext.rowCount === 0) {
+      return res.status(401).json({
+        success: false,
+        message:
+          "Your account or hospital assignment is no longer active. Please sign in again.",
+        code: "AUTH_ASSIGNMENT_REVOKED",
+      });
+    }
+
+    const authenticatedContext = activeContext.rows[0];
+
     req.user = {
       userId,
       hospitalId,
-      username:
-        decoded.username || null,
-      fullName:
-        decoded.fullName || null,
-      role:
-        decoded.role || null,
-      department:
-        decoded.department || null,
+      assignmentId: Number(authenticatedContext.assignment_id),
+      username: authenticatedContext.username,
+      fullName: authenticatedContext.full_name,
+      role: authenticatedContext.role,
+      department: authenticatedContext.department || null,
     };
 
     return next();
