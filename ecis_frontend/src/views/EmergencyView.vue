@@ -1,5 +1,14 @@
 <template>
   <div>
+    <div
+      v-if="!canAccessEmergency"
+      class="rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900"
+      role="status"
+    >
+      Emergency records are restricted to authorized doctors. Contact your hospital administrator if your role should include this access.
+    </div>
+
+    <div v-else>
     <PageHeader
       eyebrow="Emergency department"
       title="Emergency cases"
@@ -856,6 +865,7 @@
         </div>
       </div>
     </Modal>
+    </div>
   </div>
 </template>
 
@@ -899,6 +909,24 @@ import {
   apiGet,
   apiPost,
 } from "../services/api";
+
+
+function hasEmergencyAccess(): boolean {
+  try {
+    const user = JSON.parse(
+      localStorage.getItem("ecis-user") || "null",
+    );
+
+    return String(user?.role || "")
+      .trim()
+      .toUpperCase() === "DOCTOR";
+  } catch {
+    return false;
+  }
+}
+
+
+const canAccessEmergency = hasEmergencyAccess();
 
 
 interface EmergencyCase {
@@ -1688,6 +1716,10 @@ function statusTone(
    ============================================================ */
 
 onMounted(async () => {
+  if (!canAccessEmergency) {
+    return;
+  }
+
   await Promise.all([
     loadEmergencies(),
     loadPatients(),

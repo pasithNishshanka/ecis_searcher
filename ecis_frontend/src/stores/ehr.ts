@@ -53,6 +53,25 @@ function getHospitalId(): number | null {
 }
 
 
+function getAuthenticatedRole(): string | null {
+  try {
+    const rawUser = localStorage.getItem("ecis-user");
+
+    if (!rawUser) {
+      return null;
+    }
+
+    const role = String(JSON.parse(rawUser)?.role || "")
+      .trim()
+      .toUpperCase();
+
+    return role || null;
+  } catch {
+    return null;
+  }
+}
+
+
 /* ============================================================
    REACTIVE STATE
    ============================================================ */
@@ -743,6 +762,11 @@ async function loadTreatments() {
    ============================================================ */
 
 async function loadEmergencies() {
+  if (getAuthenticatedRole() !== "DOCTOR") {
+    db.emergencies.splice(0, db.emergencies.length);
+    return;
+  }
+
   try {
     const response =
       await apiGet<any>(
