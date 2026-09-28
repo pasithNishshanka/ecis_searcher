@@ -12,13 +12,21 @@
       :title="`${patient.firstName} ${patient.lastName}`"
       :description="`${patient.patientNumber} · Longitudinal clinical record`"
     >
-      <BaseButton
-        @click="
-          openTreatment = true
-        "
-      >
-        Add clinical record
-      </BaseButton>
+      <div class="flex flex-col items-start gap-2 sm:items-end">
+        <span
+          v-if="isSyntheticDatasetNote(patient.registrationNotes)"
+          class="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600"
+        >
+          Viva demonstration · simulated patient
+        </span>
+        <BaseButton
+          @click="
+            openTreatment = true
+          "
+        >
+          Add clinical record
+        </BaseButton>
+      </div>
     </PageHeader>
 
 
@@ -268,7 +276,8 @@
 
         <div
           v-if="
-            patient.registrationNotes
+            patient.registrationNotes &&
+            !isSyntheticDatasetNote(patient.registrationNotes)
           "
           class="rounded-2xl bg-slate-50 p-5"
         >
@@ -868,11 +877,15 @@
                 class="text-sm text-slate-600"
               >
                 <b>
-                  Doctor:
+                  {{
+                    isSyntheticDatasetActor(t.doctor)
+                      ? "Record source:"
+                      : "Doctor:"
+                  }}
                 </b>
 
                 {{
-                  t.doctor ||
+                  displayClinicalActor(t.doctor) ||
                   "—"
                 }}
               </p>
@@ -1351,6 +1364,11 @@
 
 <script setup lang="ts">
 import { calculateAge } from "../utils/patient";
+import {
+  displayClinicalActor,
+  isSyntheticDatasetActor,
+  isSyntheticDatasetNote,
+} from "../utils/simulation";
 
 import {
   computed,

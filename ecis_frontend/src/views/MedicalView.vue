@@ -181,6 +181,11 @@ patient in filteredPatients
                                         }}
                                     </span>
                                 </p>
+
+                                <span v-if="isSyntheticDatasetNote(selected.registrationNotes)"
+                                    class="mt-2 inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+                                    Viva demonstration · simulated patient
+                                </span>
                             </div>
                         </div>
 
@@ -252,8 +257,9 @@ allergy in allergyNames
 
                             <p class="mt-1 text-sm text-slate-600">
                                 {{
-                                    selected.registrationNotes ||
-                                "No registration notes recorded."
+                                    isSyntheticDatasetNote(selected.registrationNotes)
+                                        ? "No registration notes recorded."
+                                        : selected.registrationNotes || "No registration notes recorded."
                                 }}
                             </p>
                         </div>
@@ -620,6 +626,11 @@ import {
 import {
     useEHR,
 } from "../stores/ehr";
+
+import {
+    isSyntheticDatasetActor,
+    isSyntheticDatasetNote,
+} from "../utils/simulation";
 
 
 type TimelineEvent = {
@@ -1499,12 +1510,14 @@ function eventDetailLines(
         }
 
 
+        const isDatasetActor = isSyntheticDatasetActor(value);
+
         lines.push({
-            label,
+            label: isDatasetActor ? "Record source" : label,
             value:
-                String(
-                    value,
-                ),
+                isDatasetActor
+                    ? "Viva training dataset"
+                    : String(value),
         });
     };
 
