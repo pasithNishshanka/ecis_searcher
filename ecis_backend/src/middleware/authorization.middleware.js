@@ -1,3 +1,5 @@
+const { hasLocalSystemAdminAccess } = require("../config/localAccess");
+
 const authorizeRoles = (...allowedRoles) => {
   return (
     req,
@@ -28,9 +30,8 @@ const authorizeRoles = (...allowedRoles) => {
       );
 
     if (
-      !normalizedAllowedRoles.includes(
-        userRole,
-      )
+      !normalizedAllowedRoles.includes(userRole) &&
+      !hasLocalSystemAdminAccess(userRole)
     ) {
       return res.status(403).json({
         success: false,

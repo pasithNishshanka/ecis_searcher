@@ -46,6 +46,7 @@ async function refresh(req, res) {
       await authService.refreshAccessToken(
         refreshToken,
         req.body?.hospitalId,
+        req.body?.assignmentId,
       );
 
     return res.status(200).json({
@@ -71,6 +72,7 @@ async function switchHospital(req, res) {
       await authService.switchHospitalContext({
         userId: req.user?.userId,
         hospitalId: req.body?.hospitalId,
+        assignmentId: req.body?.assignmentId,
       });
 
     return res.status(200).json({
@@ -94,6 +96,7 @@ async function getContext(req, res) {
       await authService.getHospitalContext({
         userId: req.user?.userId,
         hospitalId: req.user?.hospitalId,
+        assignmentId: req.user?.assignmentId,
       });
 
     return res.status(200).json({

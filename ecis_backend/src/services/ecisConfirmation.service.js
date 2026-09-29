@@ -1,5 +1,6 @@
 const pool =
   require("../config/database");
+const { hasLocalSystemAdminAccess } = require("../config/localAccess");
 
 
 function positiveInteger(
@@ -251,9 +252,8 @@ async function confirmIdentity(
       ![
         "DOCTOR",
         "ADMIN",
-      ].includes(
-        role,
-      )
+      ].includes(role) &&
+      !hasLocalSystemAdminAccess(role)
     ) {
       throw new Error(
         "Reviewer is not authorized to confirm identity",

@@ -1,4 +1,5 @@
 const pool = require("../config/database");
+const { hasLocalSystemAdminAccess } = require("../config/localAccess");
 
 
 function cleanString(value) {
@@ -407,7 +408,8 @@ async function createBhtEntry(
       String(
         recordedUser.role,
       ).toUpperCase() !==
-        "DOCTOR"
+        "DOCTOR" &&
+      !hasLocalSystemAdminAccess(recordedUser.role)
     ) {
       throw new Error(
         "Only an authenticated doctor can create a BHT clinical entry.",

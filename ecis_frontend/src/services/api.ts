@@ -65,7 +65,7 @@ function getRefreshToken(): string | null {
 }
 
 
-function getActiveHospitalId(): number | null {
+function getActiveHospitalContext(): { hospitalId: number; assignmentId: number | null } | null {
   try {
     const user = JSON.parse(
       localStorage.getItem(
@@ -77,11 +77,15 @@ function getActiveHospitalId(): number | null {
       user?.hospitalId,
     );
 
-    return Number.isInteger(
+    if (!Number.isInteger(
       hospitalId,
-    ) && hospitalId > 0
-      ? hospitalId
-      : null;
+    ) || hospitalId <= 0) return null;
+
+    const assignmentId = Number(user?.assignmentId);
+    return {
+      hospitalId,
+      assignmentId: Number.isInteger(assignmentId) && assignmentId > 0 ? assignmentId : null,
+    };
   } catch {
     return null;
   }
@@ -161,8 +165,8 @@ export async function refreshAccessToken(): Promise<
   }
 
   try {
-    const hospitalId =
-      getActiveHospitalId();
+    const context =
+      getActiveHospitalContext();
 
     const response =
       await fetch(
@@ -177,7 +181,8 @@ export async function refreshAccessToken(): Promise<
 
           body: JSON.stringify({
             refreshToken,
-            hospitalId,
+            hospitalId: context?.hospitalId,
+            assignmentId: context?.assignmentId,
           }),
         },
       );
@@ -468,6 +473,7 @@ export function apiPost<T>(
 
 export async function switchHospitalContext(
   hospitalId: number,
+  assignmentId?: number,
 ): Promise<void> {
   const response =
     await apiRequest<RefreshResponse>(
@@ -476,6 +482,7 @@ export async function switchHospitalContext(
         method: "POST",
         body: JSON.stringify({
           hospitalId,
+          assignmentId,
         }),
       },
     );

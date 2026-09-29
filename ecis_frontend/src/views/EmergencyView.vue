@@ -5,7 +5,7 @@
       class="rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900"
       role="status"
     >
-      Emergency records are restricted to authorized doctors. Contact your hospital administrator if your role should include this access.
+      Your current hospital assignment does not include Emergency access.
     </div>
 
     <div v-else>
@@ -14,13 +14,14 @@
       title="Emergency cases"
       description="An unidentified patient can enter the emergency workflow without creating a second identity record."
     >
-      <BaseButton @click="open = true">
+      <BaseButton v-if="canManageEmergency" @click="open = true">
         <template #icon>
           <Plus :size="16" />
         </template>
 
         New emergency case
       </BaseButton>
+      <span v-else class="badge bg-slate-100 text-slate-600">Read-only</span>
     </PageHeader>
 
 
@@ -181,6 +182,7 @@
 
             <RouterLink
               v-if="
+                canManageEmergency &&
                 e.unidentified_patient &&
                 e.status !== 'DISCHARGED'
               "
@@ -243,7 +245,7 @@
         </p>
 
         <p class="mt-1 text-sm text-slate-400">
-          Create an emergency case to begin.
+          No emergency cases are recorded for this hospital.
         </p>
       </div>
     </div>
@@ -911,7 +913,7 @@ import {
 } from "../services/api";
 
 
-function hasEmergencyAccess(): boolean {
+function authenticatedRole(): string {
   try {
     const user = JSON.parse(
       localStorage.getItem("ecis-user") || "null",
@@ -919,14 +921,24 @@ function hasEmergencyAccess(): boolean {
 
     return String(user?.role || "")
       .trim()
-      .toUpperCase() === "DOCTOR";
+      .toUpperCase();
   } catch {
-    return false;
+    return "";
   }
 }
 
 
-const canAccessEmergency = hasEmergencyAccess();
+const role = authenticatedRole();
+const canAccessEmergency = [
+  "DOCTOR",
+  "NURSE",
+  "ADMIN",
+  "HOSPITAL_ADMIN",
+  "SYSTEM_ADMIN",
+].includes(role);
+const canManageEmergency =
+  role === "DOCTOR" ||
+  (import.meta.env.DEV && role === "SYSTEM_ADMIN");
 
 
 interface EmergencyCase {
@@ -963,6 +975,8 @@ interface EmergencyCase {
   assigned_doctor_id?: number | null;
 
   assigned_doctor_name?: string | null;
+
+  current_location?: EmergencyLocation | null;
 }
 
 
@@ -1198,48 +1212,11 @@ async function loadEmergencies() {
       response.data || [];
 
 
-    /*
-     * Clear old location cache before
-     * rebuilding it from current cases.
-     */
-    currentLocationByCase.value =
-      {};
-
-
-    /*
-     * Current location is supplementary information.
-     *
-     * A failed location request must NOT make
-     * the entire emergency page fail.
-     */
-    await Promise.all(
-      emergencies.value.map(
-        async (emergencyCase) => {
-          try {
-            const locationResponse =
-              await apiGet<{
-                success: boolean;
-
-                data:
-                  | EmergencyLocation
-                  | null;
-              }>(
-                `/emergency/${emergencyCase.emergency_case_id}/location`,
-              );
-
-            currentLocationByCase.value[
-              emergencyCase.emergency_case_id
-            ] =
-              locationResponse.data ||
-              null;
-          } catch {
-            currentLocationByCase.value[
-              emergencyCase.emergency_case_id
-            ] =
-              null;
-          }
-        },
-      ),
+    currentLocationByCase.value = Object.fromEntries(
+      emergencies.value.map((emergencyCase) => [
+        emergencyCase.emergency_case_id,
+        emergencyCase.current_location || null,
+      ]),
     );
   } catch (err) {
     error.value =
@@ -1722,7 +1699,7 @@ onMounted(async () => {
 
   await Promise.all([
     loadEmergencies(),
-    loadPatients(),
+    ...(canManageEmergency ? [loadPatients()] : []),
   ]);
 });
 </script>

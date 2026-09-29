@@ -1,4 +1,5 @@
 const pool = require("../config/database");
+const { hasLocalSystemAdminAccess } = require("../config/localAccess");
 
 const VALID_STATUSES = [
   "REJECTED",
@@ -233,7 +234,8 @@ async function reviewCandidate({
       )
         .trim()
         .toUpperCase() !==
-      "DOCTOR"
+        "DOCTOR" &&
+      !hasLocalSystemAdminAccess(reviewer.role)
     ) {
       throw new Error(
         "Only an authenticated doctor can review an ECIS candidate",

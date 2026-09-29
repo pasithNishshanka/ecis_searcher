@@ -1308,7 +1308,8 @@ async function getEmergencyCases(
       h.hospital_name,
 
       u.user_id AS assigned_doctor_id,
-      u.full_name AS assigned_doctor_name
+      u.full_name AS assigned_doctor_name,
+      to_jsonb(current_location) AS current_location
 
     FROM public.emergency_cases e
 
@@ -1320,6 +1321,24 @@ async function getEmergencyCases(
 
     LEFT JOIN public.hospital_users u
       ON e.assigned_doctor_id = u.user_id
+
+    LEFT JOIN LATERAL (
+      SELECT
+        ecl.emergency_case_location_id,
+        ecl.emergency_case_id,
+        ecl.bed_id,
+        ecl.location_type,
+        ecl.started_at,
+        b.bed_number,
+        w.ward_name
+      FROM public.emergency_case_locations ecl
+      JOIN public.beds b ON b.bed_id = ecl.bed_id
+      JOIN public.wards w ON w.ward_id = b.ward_id
+      WHERE ecl.emergency_case_id = e.emergency_case_id
+        AND ecl.ended_at IS NULL
+      ORDER BY ecl.started_at DESC
+      LIMIT 1
+    ) current_location ON TRUE
 
     WHERE
       e.hospital_id = $1

@@ -1,4 +1,5 @@
 const pool = require("../config/database");
+const { hasLocalSystemAdminAccess } = require("../config/localAccess");
 
 function nullablePositiveInteger(value, fieldName) {
   if (
@@ -331,7 +332,8 @@ async function validateRecordingUser(
     )
       .trim()
       .toUpperCase() !==
-    "DOCTOR"
+      "DOCTOR" &&
+    !hasLocalSystemAdminAccess(user.role)
   ) {
     throw new Error(
       "Only an authenticated doctor can record surgery",

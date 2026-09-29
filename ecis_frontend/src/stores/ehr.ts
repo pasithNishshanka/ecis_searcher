@@ -762,7 +762,13 @@ async function loadTreatments() {
    ============================================================ */
 
 async function loadEmergencies() {
-  if (getAuthenticatedRole() !== "DOCTOR") {
+  if (![
+    "DOCTOR",
+    "NURSE",
+    "ADMIN",
+    "HOSPITAL_ADMIN",
+    "SYSTEM_ADMIN",
+  ].includes(getAuthenticatedRole() || "")) {
     db.emergencies.splice(0, db.emergencies.length);
     return;
   }

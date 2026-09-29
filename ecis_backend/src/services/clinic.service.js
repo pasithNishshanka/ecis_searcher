@@ -1,4 +1,5 @@
 const pool = require("../config/database");
+const { hasLocalSystemAdminAccess } = require("../config/localAccess");
 
 function cleanString(value) {
   if (value === undefined || value === null) {
@@ -479,7 +480,8 @@ async function createClinicVisit(
       String(
         doctor.role,
       ).toUpperCase() !==
-        "DOCTOR"
+        "DOCTOR" &&
+      !hasLocalSystemAdminAccess(doctor.role)
     ) {
       throw new Error(
         "Only a doctor can complete a clinic consultation.",

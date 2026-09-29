@@ -12,7 +12,7 @@ const REFRESH_TOKEN_EXPIRES_IN_DAYS = Number(
   process.env.JWT_REFRESH_EXPIRES_IN_DAYS || 7,
 );
 
-function optionalPositiveInteger(value) {
+function optionalPositiveInteger(value, fieldName = "hospitalId") {
   if (value === undefined || value === null || value === "") {
     return null;
   }
@@ -20,7 +20,7 @@ function optionalPositiveInteger(value) {
   const number = Number(value);
 
   if (!Number.isInteger(number) || number <= 0) {
-    throw new Error("hospitalId must be a positive integer.");
+    throw new Error(`${fieldName} must be a positive integer.`);
   }
 
   return number;
@@ -95,7 +95,7 @@ async function getHospitalAssignments(userId) {
   return result.rows;
 }
 
-async function resolveHospitalAssignment(userId, requestedHospitalId) {
+async function resolveHospitalAssignment(userId, requestedHospitalId, requestedAssignmentId) {
   const assignments = await getHospitalAssignments(userId);
 
   if (assignments.length === 0) {
@@ -103,13 +103,16 @@ async function resolveHospitalAssignment(userId, requestedHospitalId) {
   }
 
   const hospitalId = optionalPositiveInteger(requestedHospitalId);
+  const assignmentId = optionalPositiveInteger(requestedAssignmentId, "assignmentId");
 
-  const assignment = hospitalId
-    ? assignments.find((item) => Number(item.hospital_id) === hospitalId)
-    : assignments[0];
+  const assignment = assignmentId
+    ? assignments.find((item) => Number(item.assignment_id) === assignmentId)
+    : hospitalId
+      ? assignments.find((item) => Number(item.hospital_id) === hospitalId)
+      : assignments[0];
 
-  if (!assignment) {
-    throw new Error("The selected hospital is not assigned to this user.");
+  if (!assignment || (hospitalId && Number(assignment.hospital_id) !== hospitalId)) {
+    throw new Error("The selected hospital assignment is not available for this user.");
   }
 
   return {
@@ -220,10 +223,11 @@ async function findActiveUserById(userId) {
   return result.rows[0];
 }
 
-async function buildAuthenticatedContext(user, hospitalId) {
+async function buildAuthenticatedContext(user, hospitalId, assignmentId) {
   const { assignment, assignments } = await resolveHospitalAssignment(
     user.user_id,
     hospitalId,
+    assignmentId,
   );
 
   return {
@@ -293,7 +297,7 @@ async function login({ username, password, hospitalId }) {
   };
 }
 
-async function refreshAccessToken(refreshToken, hospitalId) {
+async function refreshAccessToken(refreshToken, hospitalId, assignmentId) {
   if (!refreshToken || typeof refreshToken !== "string") {
     throw new Error("Refresh token is required.");
   }
@@ -349,19 +353,20 @@ async function refreshAccessToken(refreshToken, hospitalId) {
     throw new Error("This user account is inactive.");
   }
 
-  return buildAuthenticatedContext(session, hospitalId);
+  return buildAuthenticatedContext(session, hospitalId, assignmentId);
 }
 
-async function switchHospitalContext({ userId, hospitalId }) {
+async function switchHospitalContext({ userId, hospitalId, assignmentId }) {
   const user = await findActiveUserById(userId);
-  return buildAuthenticatedContext(user, hospitalId);
+  return buildAuthenticatedContext(user, hospitalId, assignmentId);
 }
 
-async function getHospitalContext({ userId, hospitalId }) {
+async function getHospitalContext({ userId, hospitalId, assignmentId }) {
   const user = await findActiveUserById(userId);
   const { assignment, assignments } = await resolveHospitalAssignment(
     user.user_id,
     hospitalId,
+    assignmentId,
   );
 
   return authenticatedUserResponse(user, assignment, assignments);

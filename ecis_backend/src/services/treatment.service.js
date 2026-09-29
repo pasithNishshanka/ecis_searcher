@@ -334,13 +334,17 @@ async function getPatientTreatments(
         u.user_id
           AS performed_by_id,
 
-        u.full_name
+        CASE WHEN u.role = 'DATASET_GENERATOR' THEN NULL ELSE u.full_name END
           AS performed_by_name,
 
         e.department,
 
-        e.chief_complaint
-          AS diagnosis
+        COALESCE(
+          NULLIF(o.diagnosis_summary, ''),
+          NULLIF(cv.diagnosis_summary, ''),
+          NULLIF(a.admission_diagnosis, ''),
+          NULLIF(e.chief_complaint, '')
+        ) AS diagnosis
 
       FROM
         public.treatment_records t
@@ -359,6 +363,10 @@ async function getPatientTreatments(
         public.encounters e
           ON e.encounter_id =
              t.encounter_id
+
+      LEFT JOIN public.opd_visits o ON o.opd_visit_id = t.opd_visit_id
+      LEFT JOIN public.clinic_visits cv ON cv.clinic_visit_id = t.clinic_visit_id
+      LEFT JOIN public.admissions a ON a.admission_id = t.admission_id
 
       WHERE
         t.patient_id = $1
@@ -389,7 +397,7 @@ async function getTreatmentById(
         p.patient_number,
         p.first_name,
         p.last_name,
-        u.full_name
+        CASE WHEN u.role = 'DATASET_GENERATOR' THEN NULL ELSE u.full_name END
           AS performed_by_name
 
       FROM
@@ -451,10 +459,16 @@ async function getAllTreatments(
         p.first_name,
         p.last_name,
 
-        u.full_name
+        CASE WHEN u.role = 'DATASET_GENERATOR' THEN NULL ELSE u.full_name END
           AS performed_by_name,
 
-        e.department
+        e.department,
+        COALESCE(
+          NULLIF(o.diagnosis_summary, ''),
+          NULLIF(cv.diagnosis_summary, ''),
+          NULLIF(a.admission_diagnosis, ''),
+          NULLIF(e.chief_complaint, '')
+        ) AS diagnosis
 
       FROM
         public.treatment_records t
@@ -473,6 +487,10 @@ async function getAllTreatments(
         public.encounters e
           ON e.encounter_id =
              t.encounter_id
+
+      LEFT JOIN public.opd_visits o ON o.opd_visit_id = t.opd_visit_id
+      LEFT JOIN public.clinic_visits cv ON cv.clinic_visit_id = t.clinic_visit_id
+      LEFT JOIN public.admissions a ON a.admission_id = t.admission_id
 
       WHERE
         p.hospital_id = $1

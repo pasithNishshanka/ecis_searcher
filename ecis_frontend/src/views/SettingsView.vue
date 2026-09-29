@@ -3,7 +3,7 @@
     <PageHeader
       eyebrow="Authenticated user"
       title="Hospital context"
-      description="Your hospital, role, and permissions are provided by the backend. They are not stored as clinical data in the frontend."
+      description="Manage your hospital assignment and staff access."
     >
       <span class="badge bg-teal-50 text-teal-700">{{ context?.role || "Loading role" }}</span>
     </PageHeader>
@@ -15,7 +15,7 @@
       {{ success }}
     </div>
 
-    <div class="grid gap-5 lg:grid-cols-2">
+    <div class="max-w-3xl">
       <section class="card p-5">
         <h2 class="section-title">Current clinical context</h2>
 
@@ -31,22 +31,22 @@
           </div>
 
           <div>
-            <label for="hospital-context" class="label">Working hospital</label>
+            <label for="hospital-context" class="label">Working hospital and role</label>
             <select
               id="hospital-context"
-              v-model.number="selectedHospitalId"
+              v-model.number="selectedAssignmentId"
               class="field mt-1"
               :disabled="switching || context.hospitalAssignments.length < 2"
             >
-              <option v-for="assignment in context.hospitalAssignments" :key="assignment.assignmentId" :value="assignment.hospitalId">
+              <option v-for="assignment in context.hospitalAssignments" :key="assignment.assignmentId" :value="assignment.assignmentId">
                 {{ assignment.hospitalName }} · {{ assignment.role }}
               </option>
             </select>
             <p class="mt-2 text-xs text-slate-500">
-              A hospital switch replaces the access token and reloads clinical data for the selected authorized hospital.
+              Switching applies the selected hospital and role to your current session.
             </p>
             <p v-if="context.hospitalAssignments.length < 2" class="mt-2 rounded-lg bg-amber-50 p-3 text-xs text-amber-800">
-              Switching is unavailable because this user has only one active hospital assignment. A system administrator must add another authorized assignment first.
+              No other hospital or role assignment is available for this account.
             </p>
           </div>
 
@@ -62,7 +62,7 @@
           </dl>
 
           <BaseButton :disabled="!canSwitch" :loading="switching" @click="switchHospital">
-            Switch hospital
+            Switch assignment
           </BaseButton>
         </div>
 
@@ -71,14 +71,6 @@
         </div>
       </section>
 
-      <section class="card p-5">
-        <h2 class="section-title">Access model</h2>
-        <div class="mt-4 space-y-3 text-sm leading-6 text-slate-600">
-          <p>Each clinical request is authorized by the backend using the signed-in user, active hospital assignment, and role.</p>
-          <p>Patient and clinical records remain in PostgreSQL. Browser state only holds the current authenticated session and never acts as the clinical source of truth.</p>
-          <p>Hospital switching is available only for assignments created by an authorized administrator.</p>
-        </div>
-      </section>
     </div>
 
     <section v-if="context && !canManageAssignments" class="card mt-5 p-5">
@@ -344,7 +336,7 @@ type DataResponse<T> = { data?: T };
 const assignmentRoles = ["ADMIN", "HOSPITAL_ADMIN", "DOCTOR", "NURSE", "SURGEON", "RADIOLOGIST", "LAB_TECHNICIAN", "PHARMACIST", "RECEPTIONIST", "ECIS_SEARCHER"];
 const today = new Date().toISOString().slice(0, 10);
 const context = ref<UserContext | null>(null);
-const selectedHospitalId = ref<number | null>(null);
+const selectedAssignmentId = ref<number | null>(null);
 const loading = ref(true);
 const switching = ref(false);
 const error = ref("");
@@ -395,13 +387,13 @@ const staffAccountForm = ref({
 });
 
 const selectedAssignment = computed(() => context.value?.hospitalAssignments.find(
-  (assignment) => assignment.hospitalId === selectedHospitalId.value,
+  (assignment) => assignment.assignmentId === selectedAssignmentId.value,
 ) || null);
 const normalizedRole = computed(() => String(context.value?.role || "").trim().toUpperCase());
 const canManageAssignments = computed(() => ["SYSTEM_ADMIN", "ADMIN", "HOSPITAL_ADMIN"].includes(normalizedRole.value));
 const canCreateHospitals = computed(() => normalizedRole.value === "SYSTEM_ADMIN");
 const isHospitalAdministrator = computed(() => ["ADMIN", "HOSPITAL_ADMIN"].includes(normalizedRole.value));
-const canSwitch = computed(() => selectedHospitalId.value !== null && selectedHospitalId.value !== context.value?.hospitalId && !switching.value);
+const canSwitch = computed(() => selectedAssignmentId.value !== null && selectedAssignmentId.value !== context.value?.assignmentId && !switching.value);
 
 function messageFrom(errorValue: unknown, fallback: string) {
   return errorValue instanceof Error ? errorValue.message : fallback;
@@ -418,7 +410,7 @@ async function loadContext() {
   try {
     const response = await apiGet<DataResponse<UserContext>>("/auth/context");
     context.value = response?.data || null;
-    selectedHospitalId.value = context.value?.hospitalId || null;
+    selectedAssignmentId.value = context.value?.assignmentId || null;
     assignmentForm.value.hospitalId = context.value?.hospitalId || null;
     staffAccountForm.value.hospitalId = context.value?.hospitalId || null;
     if (canManageAssignments.value) {
@@ -445,11 +437,11 @@ async function loadAdministration() {
 }
 
 async function switchHospital() {
-  if (!canSwitch.value || selectedHospitalId.value === null) return;
+  if (!canSwitch.value || !selectedAssignment.value) return;
   switching.value = true;
   clearFeedback();
   try {
-    await switchHospitalContext(selectedHospitalId.value);
+    await switchHospitalContext(selectedAssignment.value.hospitalId, selectedAssignment.value.assignmentId);
     window.location.assign("/dashboard");
   } catch (switchError) {
     error.value = messageFrom(switchError, "Unable to switch hospital context.");

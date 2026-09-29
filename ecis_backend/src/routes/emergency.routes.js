@@ -26,13 +26,15 @@ const router = express.Router();
  */
 router.use(authenticate);
 
-/*
- * Emergency clinical operations are currently restricted
- * to doctors, matching the existing project authorization.
- */
-router.use(
-  authorizeRoles("DOCTOR"),
+const canViewEmergency = authorizeRoles(
+  "DOCTOR",
+  "NURSE",
+  "ADMIN",
+  "HOSPITAL_ADMIN",
+  "SYSTEM_ADMIN",
 );
+
+const canManageEmergency = authorizeRoles("DOCTOR");
 
 /*
  * ------------------------------------------------------------
@@ -42,16 +44,19 @@ router.use(
 
 router.post(
   "/",
+  canManageEmergency,
   createEmergencyCase,
 );
 
 router.get(
   "/",
+  canViewEmergency,
   getEmergencyCases,
 );
 
 router.get(
   "/:emergencyCaseId",
+  canViewEmergency,
   getEmergencyCaseById,
 );
 
@@ -88,26 +93,31 @@ router.get(
 
 router.post(
   "/:emergencyCaseId/location",
+  canManageEmergency,
   assignEmergencyLocation,
 );
 
 router.post(
   "/:emergencyCaseId/location/transfer",
+  canManageEmergency,
   transferEmergencyLocation,
 );
 
 router.get(
   "/:emergencyCaseId/location",
+  canViewEmergency,
   getEmergencyCaseLocation,
 );
 
 router.get(
   "/:emergencyCaseId/location/history",
+  canViewEmergency,
   getEmergencyCaseLocationHistory,
 );
 
 router.post(
   "/:emergencyCaseId/discharge",
+  canManageEmergency,
   dischargeEmergencyCase,
 );
 
