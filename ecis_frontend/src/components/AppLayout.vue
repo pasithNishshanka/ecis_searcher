@@ -111,6 +111,26 @@
     <div
       class="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-200 bg-white p-2 lg:hidden"
     >
+      <nav
+        v-if="mobileMenuOpen"
+        class="absolute bottom-full left-0 right-0 max-h-[60vh] overflow-y-auto rounded-t-xl border-t border-slate-200 bg-white p-3 shadow-lg"
+        aria-label="All modules"
+      >
+        <div class="grid grid-cols-2 gap-1">
+          <RouterLink
+            v-for="item in nav"
+            :key="item.path"
+            :to="item.path"
+            class="flex items-center gap-2 rounded-lg p-3 text-sm font-semibold text-slate-700"
+            active-class="bg-teal-50 text-teal-700"
+            @click="mobileMenuOpen = false"
+          >
+            <component :is="item.icon" :size="17" />
+            {{ item.label }}
+          </RouterLink>
+        </div>
+      </nav>
+
       <div
         class="grid grid-cols-5 gap-1"
       >
@@ -131,6 +151,16 @@
             item.label
           }}
         </RouterLink>
+
+        <button
+          type="button"
+          class="rounded-lg p-2 text-center text-[10px] font-bold text-slate-500"
+          :aria-expanded="mobileMenuOpen"
+          @click="mobileMenuOpen = !mobileMenuOpen"
+        >
+          <Menu :size="16" class="mx-auto mb-0.5" />
+          More
+        </button>
       </div>
     </div>
   </div>
@@ -138,6 +168,7 @@
 
 
 <script setup lang="ts">
+import { ref } from "vue";
 import {
   BedDouble,
   ClipboardList,
@@ -146,6 +177,7 @@ import {
   FlaskConical,
   HeartPulse,
   LayoutDashboard,
+  Menu,
   Pill,
   ScanLine,
   Scissors,
@@ -256,11 +288,11 @@ const nav = [
 ];
 
 
-const mobileNav =
-  nav.slice(
-    0,
-    5,
-  );
+const mobileMenuOpen = ref(false);
+
+const mobileNav = nav.filter((item) =>
+  ["/dashboard", "/patients", "/opd", "/pharmacy"].includes(item.path),
+);
 </script>
 
 

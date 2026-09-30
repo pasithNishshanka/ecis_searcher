@@ -409,40 +409,46 @@
                 </div>
 
 
-                <BaseButton
-                  v-if="
-                    order.status ===
-                      'REQUESTED' ||
-                    order.status ===
-                      'COLLECTED' ||
-                    order.status ===
-                      'IN_PROCESS'
-                  "
-                  size="sm"
-                  @click="
-                    openReportForm(
-                      order,
-                    )
-                  "
-                >
-                  Record report
-                </BaseButton>
+                <div class="flex shrink-0 flex-wrap gap-2">
+                  <label
+                    class="inline-flex cursor-pointer items-center rounded-xl bg-teal-700 px-3 py-2 text-sm font-semibold text-white transition hover:bg-teal-800"
+                    :class="
+                      uploadingOrderId === order.investigation_id ||
+                      order.status === 'CANCELLED'
+                        ? 'pointer-events-none opacity-60'
+                        : ''
+                    "
+                  >
+                    <Upload :size="15" />
+                    <span class="ml-2">
+                      {{ uploadingOrderId === order.investigation_id ? 'Uploading...' : 'Upload images' }}
+                    </span>
+                    <input
+                      class="sr-only"
+                      type="file"
+                      multiple
+                      accept="image/jpeg,image/png,image/webp,application/dicom,.dcm"
+                      :disabled="uploadingOrderId === order.investigation_id || order.status === 'CANCELLED'"
+                      @change="uploadImages($event, order)"
+                    />
+                  </label>
 
+                  <BaseButton
+                    v-if="['REQUESTED', 'COLLECTED', 'IN_PROCESS'].includes(order.status)"
+                    size="sm"
+                    @click="openReportForm(order)"
+                  >
+                    Record report
+                  </BaseButton>
 
-                <BaseButton
-                  v-else-if="
-                    order.status ===
-                    'RESULTED'
-                  "
-                  size="sm"
-                  @click="
-                    openReportForm(
-                      order,
-                    )
-                  "
-                >
-                  Review report
-                </BaseButton>
+                  <BaseButton
+                    v-else-if="order.status === 'RESULTED'"
+                    size="sm"
+                    @click="openReportForm(order)"
+                  >
+                    Review report
+                  </BaseButton>
+                </div>
               </div>
 
 
@@ -596,42 +602,9 @@
                      </p>
                    </div>
 
-                   <label
-                     class="inline-flex cursor-pointer items-center justify-center rounded-xl bg-teal-700 px-3 py-2 text-sm font-semibold text-white transition hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-60"
-                     :class="
-                       uploadingOrderId === order.investigation_id ||
-                       order.status === 'CANCELLED'
-                         ? 'pointer-events-none opacity-60'
-                         : ''
-                     "
-                   >
-                     <Upload :size="15" />
-
-                     <span class="ml-2">
-                       {{
-                         uploadingOrderId === order.investigation_id
-                           ? 'Uploading...'
-                           : 'Upload images'
-                       }}
-                     </span>
-
-                     <input
-                       class="sr-only"
-                       type="file"
-                       multiple
-                       accept="image/jpeg,image/png,image/webp,application/dicom,.dcm"
-                       :disabled="
-                         uploadingOrderId === order.investigation_id ||
-                         order.status === 'CANCELLED'
-                       "
-                       @change="
-                         uploadImages(
-                           $event,
-                           order,
-                         )
-                       "
-                     />
-                   </label>
+                   <p class="text-xs text-slate-500">
+                     Use Upload images at the top of this imaging order.
+                   </p>
                  </div>
 
 
@@ -770,11 +743,23 @@
               No imaging records yet
             </h3>
 
-            <p
-              class="mx-auto mt-1 max-w-md text-sm text-slate-400"
-            >
-              Select a patient and encounter, then create the first radiology request.
+            <p class="mx-auto mt-1 max-w-md text-sm text-slate-400">
+              {{
+                !selectedPatient
+                  ? 'Select a patient to view imaging orders and upload files.'
+                  : !selectedEncounter
+                    ? 'This patient needs a clinical encounter before an imaging request can be created.'
+                    : 'Create an imaging request first; images must be linked to an order.'
+              }}
             </p>
+
+            <BaseButton
+              v-if="selectedPatient && selectedEncounter"
+              class="mt-4"
+              @click="openOrderForm"
+            >
+              New imaging request
+            </BaseButton>
           </div>
         </section>
       </main>
