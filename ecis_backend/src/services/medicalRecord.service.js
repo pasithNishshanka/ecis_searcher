@@ -276,16 +276,12 @@ async function getMedicalRecord(
 
           WHERE
             e.patient_id = $1
-            AND e.hospital_id = $2
 
           ORDER BY
             e.encounter_date DESC,
             e.encounter_id DESC;
         `,
-        [
-          patientId,
-          hospitalId,
-        ],
+        [patientId],
       ),
 
       /*
@@ -347,16 +343,12 @@ async function getMedicalRecord(
 
           WHERE
             a.patient_id = $1
-            AND w.hospital_id = $2
 
           ORDER BY
             a.admission_date DESC,
             a.admission_id DESC;
         `,
-        [
-          patientId,
-          hospitalId,
-        ],
+        [patientId],
       ),
 
       /*
@@ -402,16 +394,11 @@ async function getMedicalRecord(
           WHERE
             o.patient_id = $1
 
-            AND e.hospital_id = $2
-
           ORDER BY
             o.visit_date DESC,
             o.opd_visit_id DESC;
         `,
-        [
-          patientId,
-          hospitalId,
-        ],
+        [patientId],
       ),
 
       /*
@@ -468,18 +455,11 @@ async function getMedicalRecord(
           WHERE
             cv.patient_id = $1
 
-            AND c.hospital_id = $2
-
-            AND e.hospital_id = $2
-
           ORDER BY
             cv.visit_date DESC,
             cv.clinic_visit_id DESC;
         `,
-        [
-          patientId,
-          hospitalId,
-        ],
+        [patientId],
       ),
 
       /*
@@ -519,16 +499,11 @@ async function getMedicalRecord(
           WHERE
             ec.patient_id = $1
 
-            AND ec.hospital_id = $2
-
           ORDER BY
             ec.arrival_date DESC,
             ec.emergency_case_id DESC;
         `,
-        [
-          patientId,
-          hospitalId,
-        ],
+        [patientId],
       ),
 
       /*
@@ -591,16 +566,12 @@ async function getMedicalRecord(
 
           WHERE
             b.patient_id = $1
-            AND b.hospital_id = $2
 
           ORDER BY
             b.entry_date DESC,
             b.bht_entry_id DESC;
         `,
-        [
-          patientId,
-          hospitalId,
-        ],
+        [patientId],
       ),
 
       /*
@@ -824,16 +795,11 @@ async function getMedicalRecord(
           WHERE
             patient_id = $1
 
-            AND hospital_id = $2
-
           ORDER BY
             start_date DESC NULLS LAST,
             medication_order_id DESC;
         `,
-        [
-          patientId,
-          hospitalId,
-        ],
+        [patientId],
       ),
 
       /*

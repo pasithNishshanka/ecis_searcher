@@ -425,15 +425,9 @@ async function searchPatients(
    * ----------------------------------------------------------
    */
 
-  const values = [
-    hospitalId,
-  ];
+  const values = [];
 
   const where = [
-    `
-      p.hospital_id = $1
-    `,
-
     `
       p.status = 'ACTIVE'
     `,

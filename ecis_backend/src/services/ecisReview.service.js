@@ -2,6 +2,7 @@ const pool = require("../config/database");
 const { hasLocalSystemAdminAccess } = require("../config/localAccess");
 
 const VALID_STATUSES = [
+  "CONFIRMED",
   "REJECTED",
   "NEEDS_MORE_EVIDENCE",
 ];
@@ -63,7 +64,7 @@ async function reviewCandidate({
     )
   ) {
     throw new Error(
-      "Invalid review status. Allowed values: REJECTED, NEEDS_MORE_EVIDENCE",
+      "Invalid review status. Allowed values: CONFIRMED, REJECTED, NEEDS_MORE_EVIDENCE",
     );
   }
 
@@ -160,7 +161,6 @@ async function reviewCandidate({
           FROM public.patients
           WHERE
             patient_id = $1
-            AND hospital_id = $2
             AND status = 'ACTIVE'
             AND date_of_birth <=
                 CURRENT_DATE -
@@ -169,7 +169,6 @@ async function reviewCandidate({
         `,
         [
           patientId,
-          hospitalId,
         ],
       );
 
@@ -178,7 +177,7 @@ async function reviewCandidate({
       0
     ) {
       throw new Error(
-        "Adult patient not found for the authenticated hospital",
+        "Adult patient candidate was not found",
       );
     }
 
@@ -204,7 +203,15 @@ async function reviewCandidate({
           FROM public.hospital_users
           WHERE
             user_id = $1
-            AND hospital_id = $2
+            AND EXISTS (
+              SELECT 1
+              FROM public.hospital_user_assignments a
+              WHERE a.user_id = hospital_users.user_id
+                AND a.hospital_id = $2
+                AND a.status = 'ACTIVE'
+                AND a.start_date <= CURRENT_DATE
+                AND (a.end_date IS NULL OR a.end_date >= CURRENT_DATE)
+            )
           LIMIT 1
           FOR SHARE;
         `,
@@ -406,8 +413,6 @@ async function getReviewsByEmergencyCase(
         WHERE
           r.emergency_case_id = $1
           AND ec.hospital_id = $2
-          AND p.hospital_id = $2
-          AND u.hospital_id = $2
 
         ORDER BY
           r.reviewed_at DESC,
@@ -475,8 +480,6 @@ async function getReviewById(
         WHERE
           r.review_id = $1
           AND ec.hospital_id = $2
-          AND p.hospital_id = $2
-          AND u.hospital_id = $2
 
         LIMIT 1;
       `,

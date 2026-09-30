@@ -145,19 +145,17 @@ async function confirmIdentity(
         `
           SELECT
             patient_id,
-            hospital_id,
+            patient_number,
             status,
             date_of_birth
           FROM public.patients
           WHERE
             patient_id = $1
-            AND hospital_id = $2
             AND status = 'ACTIVE'
           FOR SHARE;
         `,
         [
           patientId,
-          hospitalId,
         ],
       );
 
@@ -166,7 +164,7 @@ async function confirmIdentity(
       0
     ) {
       throw new Error(
-        "Patient not found for the authenticated hospital",
+        "Patient candidate was not found",
       );
     }
 
@@ -216,7 +214,15 @@ async function confirmIdentity(
           FROM public.hospital_users
           WHERE
             user_id = $1
-            AND hospital_id = $2
+            AND EXISTS (
+              SELECT 1
+              FROM public.hospital_user_assignments a
+              WHERE a.user_id = hospital_users.user_id
+                AND a.hospital_id = $2
+                AND a.status = 'ACTIVE'
+                AND a.start_date <= CURRENT_DATE
+                AND (a.end_date IS NULL OR a.end_date >= CURRENT_DATE)
+            )
           LIMIT 1
           FOR SHARE;
         `,
@@ -264,22 +270,20 @@ async function confirmIdentity(
       await client.query(
         `
           SELECT
-            ecis_candidate_review_id,
-            candidate_patient_id,
-            decision,
+            review_id,
+            patient_id,
+            review_status,
             reviewed_at
           FROM public.ecis_candidate_reviews
           WHERE
             emergency_case_id = $1
 
-            AND candidate_patient_id = $2
+            AND patient_id = $2
 
-            AND decision = 'CONFIRM'
-
-            AND hospital_id IS NOT NULL
+            AND review_status = 'CONFIRMED'
           ORDER BY
             reviewed_at DESC,
-            ecis_candidate_review_id DESC
+            review_id DESC
           LIMIT 1;
         `,
         [
@@ -288,55 +292,28 @@ async function confirmIdentity(
         ],
       );
 
-    /*
-     * Existing installations may not yet expose hospital_id
-     * on ecis_candidate_reviews. In that case the confirmation
-     * must still require a previous review decision.
-     */
-    let confirmedReview = null;
-
-    if (
-      reviewResult.rows.length
-    ) {
-      confirmedReview =
-        reviewResult.rows[0];
-    } else {
-      const fallbackReview =
-        await client.query(
-          `
-            SELECT
-              ecis_candidate_review_id,
-              candidate_patient_id,
-              decision,
-              reviewed_at
-            FROM public.ecis_candidate_reviews
-            WHERE
-              emergency_case_id = $1
-              AND candidate_patient_id = $2
-              AND decision = 'CONFIRM'
-            ORDER BY
-              reviewed_at DESC,
-              ecis_candidate_review_id DESC
-            LIMIT 1;
-          `,
-          [
-            emergencyCaseId,
-            patientId,
-          ],
-        );
-
-      confirmedReview =
-        fallbackReview.rows[0] ||
-        null;
-    }
+    const confirmedReview = reviewResult.rows[0] || null;
 
     if (
       !confirmedReview
     ) {
       throw new Error(
-        "Identity confirmation requires a previous CONFIRM candidate review",
+        "Identity confirmation requires a previous CONFIRMED candidate review",
       );
     }
+
+    await client.query(
+      `
+        INSERT INTO public.patient_hospital_registrations (
+          patient_id, hospital_id, hospital_patient_number,
+          status, registered_by, registered_at, updated_at
+        )
+        VALUES ($1, $2, $3, 'ACTIVE', $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ON CONFLICT (patient_id, hospital_id)
+        DO UPDATE SET status = 'ACTIVE', updated_at = CURRENT_TIMESTAMP;
+      `,
+      [patientId, hospitalId, patient.patient_number, reviewerUserId],
+    );
 
     const updateResult =
       await client.query(
@@ -362,25 +339,18 @@ async function confirmIdentity(
             identified_by =
               $2,
 
-            identification_notes =
-              COALESCE(
-                $3,
-                identification_notes
-              ),
-
             updated_at =
               CURRENT_TIMESTAMP
 
           WHERE
-            emergency_case_id = $4
-            AND hospital_id = $5
+            emergency_case_id = $3
+            AND hospital_id = $4
 
           RETURNING *;
         `,
         [
           patientId,
           reviewerUserId,
-          notes,
           emergencyCaseId,
           hospitalId,
         ],
@@ -394,6 +364,24 @@ async function confirmIdentity(
         "Emergency case could not be updated",
       );
     }
+
+    await client.query(
+      `
+        INSERT INTO public.audit_logs (
+          hospital_id, user_id, action_type, entity_type,
+          entity_id, old_values, new_values, action_reason
+        ) VALUES ($1, $2, 'IDENTITY_CONFIRMED', 'emergency_case',
+          $3, $4::jsonb, $5::jsonb, $6);
+      `,
+      [
+        hospitalId,
+        reviewerUserId,
+        emergencyCaseId,
+        JSON.stringify(emergencyCase),
+        JSON.stringify(updateResult.rows[0]),
+        notes,
+      ],
+    );
 
     await client.query(
       "COMMIT",

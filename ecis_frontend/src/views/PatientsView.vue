@@ -5,15 +5,15 @@
       title="Patients"
       description="Register each patient once and maintain the same permanent EHR throughout their care."
     >
-      <BaseButton
-        @click="openRegisterModal"
-      >
-        <template #icon>
-          <UserPlus :size="16" />
-        </template>
-
-        Register patient
-      </BaseButton>
+      <div class="flex flex-wrap gap-2">
+        <BaseButton variant="secondary" @click="openCentral = true">
+          Find existing patient
+        </BaseButton>
+        <BaseButton @click="openRegisterModal">
+          <template #icon><UserPlus :size="16" /></template>
+          Register patient
+        </BaseButton>
+      </div>
     </PageHeader>
 
 
@@ -696,6 +696,31 @@
         </div>
       </form>
     </Modal>
+
+    <Modal
+      :open="openCentral"
+      title="Find existing patient"
+      description="Search the central patient registry before creating a new record."
+      @close="closeCentral"
+    >
+      <form class="flex gap-2" @submit.prevent="searchCentral">
+        <BaseInput v-model="centralQuery" placeholder="Name, patient number, NIC or phone" required />
+        <BaseButton type="submit" :disabled="centralLoading">Search</BaseButton>
+      </form>
+      <p v-if="centralError" class="mt-3 rounded-xl bg-red-50 p-3 text-sm text-red-700">{{ centralError }}</p>
+      <p v-else-if="centralSearched && !centralResults.length" class="muted mt-4">No matching patient was found.</p>
+      <div v-else class="mt-4 max-h-80 space-y-2 overflow-y-auto">
+        <div v-for="candidate in centralResults" :key="candidate.patient_id" class="flex items-center justify-between gap-3 rounded-xl border border-slate-200 p-3">
+          <div>
+            <p class="font-bold">{{ candidate.first_name }} {{ candidate.last_name }}</p>
+            <p class="text-xs text-slate-500">{{ candidate.patient_number }} · {{ formatDate(candidate.date_of_birth) }}</p>
+          </div>
+          <BaseButton variant="secondary" size="sm" :disabled="centralSaving" @click="registerExisting(candidate)">
+            Register here
+          </BaseButton>
+        </div>
+      </div>
+    </Modal>
   </div>
 </template>
 
@@ -746,6 +771,8 @@ import {
   useEHR,
 } from "../stores/ehr";
 
+import { apiGet, apiPost } from "../services/api";
+
 import {
   calculateAge,
   formatDate,
@@ -765,7 +792,71 @@ const {
   loading,
   addPatient,
   updatePatient,
+  refresh,
 } = useEHR();
+
+type CentralPatient = {
+  patient_id: number;
+  patient_number: string;
+  first_name: string;
+  last_name: string | null;
+  date_of_birth: string | null;
+};
+
+const openCentral = ref(false);
+const centralQuery = ref("");
+const centralResults = ref<CentralPatient[]>([]);
+const centralLoading = ref(false);
+const centralSaving = ref(false);
+const centralSearched = ref(false);
+const centralError = ref("");
+
+function closeCentral() {
+  if (centralSaving.value) return;
+  openCentral.value = false;
+  centralResults.value = [];
+  centralError.value = "";
+  centralSearched.value = false;
+}
+
+async function searchCentral() {
+  const query = centralQuery.value.trim();
+  if (!query) return;
+  centralLoading.value = true;
+  centralError.value = "";
+  centralResults.value = [];
+  try {
+    const response = await apiGet<{ data?: CentralPatient[] }>(
+      `/patients/central-search?q=${encodeURIComponent(query)}`,
+    );
+    centralResults.value = response.data || [];
+    centralSearched.value = true;
+  } catch (cause) {
+    centralError.value = cause instanceof Error ? cause.message : "Patient search failed.";
+  } finally {
+    centralLoading.value = false;
+  }
+}
+
+async function registerExisting(candidate: CentralPatient) {
+  centralSaving.value = true;
+  centralError.value = "";
+  try {
+    await apiPost(`/patients/${candidate.patient_id}/register-at-current-hospital`, {});
+    await refresh();
+    openCentral.value = false;
+    centralResults.value = [];
+    centralSearched.value = false;
+    toast.title = "Patient registered";
+    toast.message = `${candidate.first_name} ${candidate.last_name || ""} is available at this hospital.`.trim();
+    toast.type = "success";
+    toast.visible = true;
+  } catch (cause) {
+    centralError.value = cause instanceof Error ? cause.message : "Unable to register patient.";
+  } finally {
+    centralSaving.value = false;
+  }
+}
 
 
 const search =

@@ -13,6 +13,10 @@ async function getCandidateEvidence(
     const hospitalId =
       Number(req.user?.hospitalId);
 
+    const emergencyCaseId = req.query.emergencyCaseId == null
+      ? null
+      : Number(req.query.emergencyCaseId);
+
     if (
       !Number.isInteger(patientId) ||
       patientId <= 0
@@ -33,10 +37,19 @@ async function getCandidateEvidence(
       });
     }
 
+    if (emergencyCaseId !== null &&
+        (!Number.isInteger(emergencyCaseId) || emergencyCaseId <= 0)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid emergencyCaseId",
+      });
+    }
+
     const evidence =
       await ecisEvidenceService.getCandidateEvidence(
         patientId,
         hospitalId,
+        emergencyCaseId,
       );
 
     return res.status(200).json({

@@ -748,21 +748,10 @@
                 </div>
 
 
-                <RouterLink
-                  :to="
-                    `/patients/${candidate.patientId}`
-                  "
-                >
-                  <BaseButton
-                    variant="secondary"
-                  >
-                    Review EHR
-
-                    <ArrowRight
-                      :size="15"
-                    />
-                  </BaseButton>
-                </RouterLink>
+                <BaseButton variant="secondary" @click="openEvidence(candidate)">
+                  Review EHR sources
+                  <ArrowRight :size="15" />
+                </BaseButton>
 
                 <BaseButton
                   v-if="hasDentalEvidence(candidate)"
@@ -792,6 +781,50 @@
         </div>
       </main>
     </div>
+
+    <Modal
+      :open="evidenceModalOpen"
+      :title="evidenceCandidate ? `EHR sources · ${evidenceCandidate.name}` : 'EHR sources'"
+      description="Verify the source records before making an identity decision."
+      @close="closeEvidence"
+    >
+      <p v-if="evidenceError" class="rounded-xl bg-red-50 p-4 text-sm text-red-700">{{ evidenceError }}</p>
+      <p v-else-if="evidenceLoading" class="muted py-8 text-center">Loading EHR sources...</p>
+      <template v-else>
+        <div class="max-h-80 space-y-4 overflow-y-auto">
+          <section v-for="section in evidenceSections" :key="section.key" class="rounded-xl border border-slate-200 p-4">
+            <h3 class="font-bold">{{ section.label }} · {{ section.records.length }}</h3>
+            <div v-for="(record, index) in section.records" :key="index" class="mt-3 rounded-lg bg-slate-50 p-3">
+              <dl class="grid gap-2 sm:grid-cols-2">
+                <div v-for="field in evidenceFields(record)" :key="field.key">
+                  <dt class="label">{{ field.label }}</dt>
+                  <dd class="mt-1 break-words text-sm">{{ field.value }}</dd>
+                </div>
+              </dl>
+            </div>
+          </section>
+          <p v-if="!evidenceSections.length" class="muted">No source records were found for this candidate.</p>
+        </div>
+
+        <div v-if="emergencyCaseId && !identityConfirmed" class="mt-5 border-t pt-4">
+          <FormField label="Human review reason" required>
+            <BaseInput v-model="reviewReason" placeholder="State the evidence you verified" />
+          </FormField>
+          <div class="mt-3 flex flex-wrap gap-2">
+            <BaseButton :disabled="reviewSaving || !reviewReason.trim()" @click="recordReview('CONFIRMED')">Record confirmed review</BaseButton>
+            <BaseButton variant="secondary" :disabled="reviewSaving || !reviewReason.trim()" @click="recordReview('NEEDS_MORE_EVIDENCE')">Need more evidence</BaseButton>
+            <BaseButton variant="secondary" :disabled="reviewSaving || !reviewReason.trim()" @click="recordReview('REJECTED')">Reject candidate</BaseButton>
+          </div>
+          <BaseButton v-if="hasConfirmedReview" class="mt-4" :disabled="reviewSaving" @click="confirmIdentity">
+            Confirm identity and link patient
+          </BaseButton>
+        </div>
+        <p v-if="reviewMessage" class="mt-4 rounded-xl bg-teal-50 p-3 text-sm text-teal-800">{{ reviewMessage }}</p>
+        <RouterLink v-if="identityConfirmed && evidenceCandidate" :to="`/patients/${evidenceCandidate.patientId}`" class="mt-4 inline-block">
+          <BaseButton variant="secondary">Open linked patient EHR</BaseButton>
+        </RouterLink>
+      </template>
+    </Modal>
 
     <Modal
       :open="dentalModalOpen"
@@ -1248,6 +1281,116 @@ const sort =
 
 const dentalModalOpen =
   ref(false);
+
+const evidenceModalOpen = ref(false);
+const evidenceCandidate = ref<BackendCandidate | null>(null);
+const evidenceData = ref<Record<string, Record<string, unknown>[]> | null>(null);
+const evidenceLoading = ref(false);
+const evidenceError = ref("");
+const reviewReason = ref("");
+const reviewSaving = ref(false);
+const reviewMessage = ref("");
+const hasConfirmedReview = ref(false);
+const identityConfirmed = ref(false);
+
+const evidenceSections = computed(() => Object.entries(evidenceData.value || {})
+  .filter(([, records]) => Array.isArray(records) && records.length)
+  .map(([key, records]) => ({
+    key,
+    label: key.replace(/([A-Z])/g, " $1").replace(/^./, (letter) => letter.toUpperCase()),
+    records,
+  })));
+
+function evidenceFields(record: Record<string, unknown>) {
+  return Object.entries(record)
+    .filter(([, value]) => value !== null && value !== undefined && value !== "" && typeof value !== "object")
+    .map(([key, value]) => ({
+      key,
+      label: key.replaceAll("_", " "),
+      value: String(value),
+    }));
+}
+
+async function openEvidence(candidate: BackendCandidate) {
+  evidenceCandidate.value = candidate;
+  evidenceData.value = null;
+  evidenceError.value = "";
+  reviewMessage.value = "";
+  reviewReason.value = "";
+  hasConfirmedReview.value = false;
+  identityConfirmed.value = false;
+  evidenceLoading.value = true;
+  evidenceModalOpen.value = true;
+  try {
+    const caseQuery = emergencyCaseId.value
+      ? `?emergencyCaseId=${encodeURIComponent(emergencyCaseId.value)}`
+      : "";
+    const response = await apiGet<{ data?: { evidence?: Record<string, Record<string, unknown>[]> } }>(
+      `/ecis/candidates/${candidate.patientId}/evidence${caseQuery}`,
+    );
+    evidenceData.value = response.data?.evidence || {};
+    if (emergencyCaseId.value) {
+      const reviews = await apiGet<{ data?: { patient_id: number; review_status: string }[] }>(
+        `/ecis/reviews/emergency/${encodeURIComponent(emergencyCaseId.value)}`,
+      );
+      hasConfirmedReview.value = (reviews.data || []).some((review) =>
+        Number(review.patient_id) === candidate.patientId && review.review_status === "CONFIRMED",
+      );
+    }
+  } catch (cause) {
+    evidenceError.value = cause instanceof Error ? cause.message : "Unable to load EHR sources.";
+  } finally {
+    evidenceLoading.value = false;
+  }
+}
+
+function closeEvidence() {
+  if (reviewSaving.value) return;
+  evidenceModalOpen.value = false;
+  evidenceCandidate.value = null;
+  evidenceData.value = null;
+}
+
+async function recordReview(reviewStatus: "CONFIRMED" | "REJECTED" | "NEEDS_MORE_EVIDENCE") {
+  if (!emergencyCaseId.value || !evidenceCandidate.value || !reviewReason.value.trim()) return;
+  reviewSaving.value = true;
+  evidenceError.value = "";
+  try {
+    await apiPost("/ecis/reviews", {
+      emergencyCaseId: Number(emergencyCaseId.value),
+      patientId: evidenceCandidate.value.patientId,
+      reviewStatus,
+      reviewReason: reviewReason.value.trim(),
+    });
+    hasConfirmedReview.value = reviewStatus === "CONFIRMED";
+    reviewMessage.value = reviewStatus === "CONFIRMED"
+      ? "Review recorded. Confirm identity to link this emergency case."
+      : "Review recorded. The emergency case remains unidentified.";
+  } catch (cause) {
+    evidenceError.value = cause instanceof Error ? cause.message : "Unable to record review.";
+  } finally {
+    reviewSaving.value = false;
+  }
+}
+
+async function confirmIdentity() {
+  if (!emergencyCaseId.value || !evidenceCandidate.value || !hasConfirmedReview.value) return;
+  reviewSaving.value = true;
+  evidenceError.value = "";
+  try {
+    await apiPost("/ecis/confirm", {
+      emergencyCaseId: Number(emergencyCaseId.value),
+      patientId: evidenceCandidate.value.patientId,
+      notes: reviewReason.value.trim() || null,
+    });
+    identityConfirmed.value = true;
+    reviewMessage.value = "Identity confirmed and linked to the existing patient record.";
+  } catch (cause) {
+    evidenceError.value = cause instanceof Error ? cause.message : "Unable to confirm identity.";
+  } finally {
+    reviewSaving.value = false;
+  }
+}
 
 
 const dentalDetailsLoading =
@@ -1840,7 +1983,7 @@ async function openDentalDetails(
           };
         };
       }>(
-        `/ecis/candidates/${candidate.patientId}/evidence`,
+        `/ecis/candidates/${candidate.patientId}/evidence${emergencyCaseId.value ? `?emergencyCaseId=${encodeURIComponent(emergencyCaseId.value)}` : ""}`,
       );
 
     const records =

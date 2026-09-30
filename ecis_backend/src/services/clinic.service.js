@@ -403,9 +403,7 @@ async function createClinicVisit(
     const clinic =
       clinicResult.rows[0];
 
-    /*
-     * Verify patient belongs to the same hospital.
-     */
+    /* Verify the central patient is registered at this hospital. */
     const patientResult =
       await client.query(
         `
@@ -419,8 +417,13 @@ async function createClinicVisit(
           FROM public.patients
           WHERE
             patient_id = $1
-            AND hospital_id = $2
             AND status = 'ACTIVE'
+            AND EXISTS (
+              SELECT 1 FROM public.patient_hospital_registrations phr
+              WHERE phr.patient_id = patients.patient_id
+                AND phr.hospital_id = $2
+                AND phr.status = 'ACTIVE'
+            )
           FOR SHARE;
         `,
         [
@@ -724,7 +727,6 @@ async function getPatientClinicHistory(
         WHERE
           cv.patient_id = $1
           AND c.hospital_id = $2
-          AND p.hospital_id = $2
           AND e.hospital_id = $2
 
         ORDER BY

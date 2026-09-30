@@ -184,9 +184,7 @@ async function createOpdVisit(opdData) {
       "BEGIN",
     );
 
-    /*
-     * Patient must belong to the authenticated hospital.
-     */
+    /* The patient keeps one central identity across registered hospitals. */
     const patientResult =
       await client.query(
         `
@@ -200,8 +198,13 @@ async function createOpdVisit(opdData) {
           FROM public.patients
           WHERE
             patient_id = $1
-            AND hospital_id = $2
             AND status = 'ACTIVE'
+            AND EXISTS (
+              SELECT 1 FROM public.patient_hospital_registrations phr
+              WHERE phr.patient_id = patients.patient_id
+                AND phr.hospital_id = $2
+                AND phr.status = 'ACTIVE'
+            )
           FOR SHARE;
         `,
         [
@@ -445,7 +448,6 @@ async function getPatientOpdHistory(
         WHERE
           o.patient_id = $1
           AND e.hospital_id = $2
-          AND p.hospital_id = $2
 
         ORDER BY
           o.visit_date DESC,

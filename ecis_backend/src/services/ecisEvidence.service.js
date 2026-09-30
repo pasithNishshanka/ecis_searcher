@@ -10,7 +10,7 @@ function positiveInteger(value, fieldName) {
   return number;
 }
 
-async function assertPatientAccess(client, patientId, hospitalId) {
+async function assertPatientAccess(client, patientId, hospitalId, emergencyCaseId) {
   const result = await client.query(
     `
       SELECT
@@ -34,12 +34,26 @@ async function assertPatientAccess(client, patientId, hospitalId) {
         ON h.hospital_id = p.hospital_id
       WHERE
         p.patient_id = $1
-        AND p.hospital_id = $2
         AND p.status = 'ACTIVE'
         AND p.date_of_birth <= CURRENT_DATE - INTERVAL '18 years'
+        AND (
+          EXISTS (
+            SELECT 1 FROM public.patient_hospital_registrations phr
+            WHERE phr.patient_id = p.patient_id
+              AND phr.hospital_id = $2
+              AND phr.status = 'ACTIVE'
+          )
+          OR EXISTS (
+            SELECT 1 FROM public.emergency_cases ec
+            WHERE ec.emergency_case_id = $3
+              AND ec.hospital_id = $2
+              AND ec.unidentified_patient = TRUE
+              AND ec.status <> 'DISCHARGED'
+          )
+        )
       LIMIT 1;
     `,
-    [patientId, hospitalId],
+    [patientId, hospitalId, emergencyCaseId],
   );
 
   if (result.rowCount === 0) {
@@ -49,9 +63,12 @@ async function assertPatientAccess(client, patientId, hospitalId) {
   return result.rows[0];
 }
 
-async function getCandidateEvidence(patientIdValue, hospitalIdValue) {
+async function getCandidateEvidence(patientIdValue, hospitalIdValue, emergencyCaseIdValue = null) {
   const patientId = positiveInteger(patientIdValue, "patientId");
   const hospitalId = positiveInteger(hospitalIdValue, "hospitalId");
+  const emergencyCaseId = emergencyCaseIdValue == null
+    ? null
+    : positiveInteger(emergencyCaseIdValue, "emergencyCaseId");
 
   const client = await pool.connect();
 
@@ -60,6 +77,7 @@ async function getCandidateEvidence(patientIdValue, hospitalIdValue) {
       client,
       patientId,
       hospitalId,
+      emergencyCaseId,
     );
 
     const [
@@ -88,13 +106,12 @@ async function getCandidateEvidence(patientIdValue, hospitalIdValue) {
           FROM public.encounters e
           WHERE
             e.patient_id = $1
-            AND e.hospital_id = $2
           ORDER BY
             e.encounter_date DESC,
             e.encounter_id DESC
           LIMIT 30;
         `,
-        [patientId, hospitalId],
+        [patientId],
       ),
 
       client.query(
@@ -122,13 +139,12 @@ async function getCandidateEvidence(patientIdValue, hospitalIdValue) {
             ON u.user_id = a.attending_doctor_id
           WHERE
             a.patient_id = $1
-            AND w.hospital_id = $2
           ORDER BY
             a.admission_date DESC,
             a.admission_id DESC
           LIMIT 20;
         `,
-        [patientId, hospitalId],
+        [patientId],
       ),
 
       client.query(
@@ -151,7 +167,6 @@ async function getCandidateEvidence(patientIdValue, hospitalIdValue) {
           FROM public.surgeries s
           INNER JOIN public.patients p
             ON p.patient_id = s.patient_id
-           AND p.hospital_id = $2
           LEFT JOIN public.hospital_users u
             ON u.user_id = s.surgeon_user_id
           WHERE
@@ -161,7 +176,7 @@ async function getCandidateEvidence(patientIdValue, hospitalIdValue) {
             s.surgery_id DESC
           LIMIT 30;
         `,
-        [patientId, hospitalId],
+        [patientId],
       ),
 
       client.query(
@@ -179,7 +194,6 @@ async function getCandidateEvidence(patientIdValue, hospitalIdValue) {
           FROM public.fractures f
           INNER JOIN public.patients p
             ON p.patient_id = f.patient_id
-           AND p.hospital_id = $2
           WHERE
             f.patient_id = $1
           ORDER BY
@@ -187,7 +201,7 @@ async function getCandidateEvidence(patientIdValue, hospitalIdValue) {
             f.fracture_id DESC
           LIMIT 30;
         `,
-        [patientId, hospitalId],
+        [patientId],
       ),
 
       client.query(
@@ -209,7 +223,6 @@ async function getCandidateEvidence(patientIdValue, hospitalIdValue) {
           FROM public.medical_devices md
           INNER JOIN public.patients p
             ON p.patient_id = md.patient_id
-           AND p.hospital_id = $2
           WHERE
             md.patient_id = $1
           ORDER BY
@@ -217,7 +230,7 @@ async function getCandidateEvidence(patientIdValue, hospitalIdValue) {
             md.device_id DESC
           LIMIT 30;
         `,
-        [patientId, hospitalId],
+        [patientId],
       ),
 
       client.query(
@@ -238,7 +251,6 @@ async function getCandidateEvidence(patientIdValue, hospitalIdValue) {
           FROM public.dental_records d
           INNER JOIN public.patients p
             ON p.patient_id = d.patient_id
-           AND p.hospital_id = $2
           LEFT JOIN public.hospital_users u
             ON u.user_id = d.recorded_by
           WHERE
@@ -248,7 +260,7 @@ async function getCandidateEvidence(patientIdValue, hospitalIdValue) {
             d.dental_record_id DESC
           LIMIT 30;
         `,
-        [patientId, hospitalId],
+        [patientId],
       ),
 
       client.query(
@@ -267,7 +279,6 @@ async function getCandidateEvidence(patientIdValue, hospitalIdValue) {
           FROM public.clinical_observations co
           INNER JOIN public.patients p
             ON p.patient_id = co.patient_id
-           AND p.hospital_id = $2
           LEFT JOIN public.hospital_users u
             ON u.user_id = co.recorded_by
           WHERE
@@ -277,7 +288,7 @@ async function getCandidateEvidence(patientIdValue, hospitalIdValue) {
             co.observation_id DESC
           LIMIT 50;
         `,
-        [patientId, hospitalId],
+        [patientId],
       ),
 
       client.query(
@@ -301,7 +312,6 @@ async function getCandidateEvidence(patientIdValue, hospitalIdValue) {
           FROM public.treatment_records t
           INNER JOIN public.patients p
             ON p.patient_id = t.patient_id
-           AND p.hospital_id = $2
           LEFT JOIN public.hospital_users u
             ON u.user_id = t.performed_by
           WHERE
@@ -311,7 +321,7 @@ async function getCandidateEvidence(patientIdValue, hospitalIdValue) {
             t.treatment_id DESC
           LIMIT 50;
         `,
-        [patientId, hospitalId],
+        [patientId],
       ),
 
       client.query(
@@ -340,7 +350,6 @@ async function getCandidateEvidence(patientIdValue, hospitalIdValue) {
           FROM public.investigations i
           INNER JOIN public.patients p
             ON p.patient_id = i.patient_id
-           AND p.hospital_id = $2
           LEFT JOIN public.hospital_users req
             ON req.user_id = i.requested_by
           LEFT JOIN public.hospital_users perf
@@ -357,7 +366,7 @@ async function getCandidateEvidence(patientIdValue, hospitalIdValue) {
             i.investigation_id DESC
           LIMIT 50;
         `,
-        [patientId, hospitalId],
+        [patientId],
       ),
 
       client.query(
@@ -390,13 +399,12 @@ async function getCandidateEvidence(patientIdValue, hospitalIdValue) {
           FROM public.vw_medication_longitudinal_history
           WHERE
             patient_id = $1
-            AND hospital_id = $2
           ORDER BY
             start_date DESC NULLS LAST,
             medication_order_id DESC
           LIMIT 50;
         `,
-        [patientId, hospitalId],
+        [patientId],
       ),
 
       client.query(
@@ -433,13 +441,12 @@ async function getCandidateEvidence(patientIdValue, hospitalIdValue) {
             ON w.ward_id = a.ward_id
           WHERE
             b.patient_id = $1
-            AND b.hospital_id = $2
           ORDER BY
             b.entry_date DESC,
             b.bht_entry_id DESC
           LIMIT 100;
         `,
-        [patientId, hospitalId],
+        [patientId],
       ),
     ]);
 

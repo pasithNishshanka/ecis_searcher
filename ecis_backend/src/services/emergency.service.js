@@ -118,8 +118,13 @@ async function createEmergencyCase(caseData) {
           FROM public.patients
           WHERE
             patient_id = $1
-            AND hospital_id = $2
             AND status = 'ACTIVE'
+            AND EXISTS (
+              SELECT 1 FROM public.patient_hospital_registrations phr
+              WHERE phr.patient_id = patients.patient_id
+                AND phr.hospital_id = $2
+                AND phr.status = 'ACTIVE'
+            )
           FOR SHARE;
         `,
         [
