@@ -3,6 +3,7 @@ const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
 
 const pool = require("../config/database");
+const { hasLocalSystemAdminAccess } = require("../config/localAccess");
 
 const ACCESS_TOKEN_EXPIRES_IN =
   process.env.JWT_ACCESS_EXPIRES_IN ||
@@ -143,6 +144,7 @@ function authenticatedUserResponse(user, assignment, assignments) {
     fullName: user.full_name,
     username: user.username,
     role: assignment.role,
+    allModuleAccess: hasLocalSystemAdminAccess(assignment.role),
     department: assignment.department || user.department,
     phone: user.phone,
     email: user.email,

@@ -6,6 +6,7 @@
       description="Manage your hospital assignment and staff access."
     >
       <span class="badge bg-teal-50 text-teal-700">{{ context?.role || "Loading role" }}</span>
+      <span v-if="context?.allModuleAccess" class="badge bg-violet-50 text-violet-700">Full module access</span>
     </PageHeader>
 
     <div v-if="error" class="mb-5 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
@@ -290,6 +291,7 @@ type HospitalAssignment = {
   hospitalId: number;
   hospitalName: string;
   role: string;
+  allModuleAccess: boolean;
   department: string | null;
   designation: string | null;
   licenseNumber: string | null;

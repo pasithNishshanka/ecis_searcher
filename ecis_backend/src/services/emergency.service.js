@@ -83,6 +83,20 @@ async function createEmergencyCase(caseData) {
       throw new Error("hospitalId is required");
     }
 
+    if (assignedDoctorId != null) {
+      const doctor = await client.query(
+        `SELECT u.user_id FROM public.hospital_users u
+          JOIN public.hospital_user_assignments a ON a.user_id = u.user_id
+         WHERE u.user_id = $1 AND u.is_active = TRUE
+           AND a.hospital_id = $2 AND a.role = 'DOCTOR'
+           AND a.status = 'ACTIVE' AND a.start_date <= CURRENT_DATE
+           AND (a.end_date IS NULL OR a.end_date >= CURRENT_DATE)
+         LIMIT 1 FOR SHARE OF u, a;`,
+        [assignedDoctorId, hospitalId],
+      );
+      if (!doctor.rowCount) throw new Error("Assigned doctor is not active at this hospital.");
+    }
+
     if (!caseNumber || !caseNumber.trim()) {
       throw new Error("caseNumber is required");
     }

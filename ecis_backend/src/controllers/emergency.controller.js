@@ -122,13 +122,21 @@ async function createEmergencyCase(
       });
     }
 
+    const assignedDoctorId = String(req.user?.role || "").toUpperCase() === "DOCTOR"
+      ? userId
+      : req.body.assignedDoctorId == null || req.body.assignedDoctorId === ""
+        ? null
+        : parsePositiveInteger(req.body.assignedDoctorId);
+
+    if (req.body.assignedDoctorId != null && req.body.assignedDoctorId !== "" && !assignedDoctorId) {
+      return res.status(400).json({ success: false, message: "assignedDoctorId must be a positive integer." });
+    }
+
     const result =
       await emergencyService.createEmergencyCase({
         ...req.body,
         hospitalId,
-        assignedDoctorId:
-          req.body.assignedDoctorId ||
-          userId,
+        assignedDoctorId,
       });
 
     return res.status(201).json({
@@ -170,6 +178,9 @@ async function createEmergencyCase(
       error?.message
         ?.toLowerCase()
         .includes("not found") ||
+      error?.message
+        ?.toLowerCase()
+        .includes("not active") ||
       error?.message
         ?.toLowerCase()
         .includes("invalid emergency status")

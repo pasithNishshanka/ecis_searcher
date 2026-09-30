@@ -14,7 +14,7 @@
       title="Emergency cases"
       description="An unidentified patient can enter the emergency workflow without creating a second identity record."
     >
-      <BaseButton v-if="canManageEmergency" @click="open = true">
+      <BaseButton v-if="canManageEmergency" @click="openCreateCase">
         <template #icon>
           <Plus :size="16" />
         </template>
@@ -197,6 +197,16 @@
                 Search ECIS
               </BaseButton>
             </RouterLink>
+
+            <BaseButton
+              v-if="canManageEmergency && e.patient_id && !e.unidentified_patient &&
+                e.status !== 'DISCHARGED' &&
+                !['WARD', 'ICU'].includes(String(currentLocationByCase[e.emergency_case_id]?.location_type || '').toUpperCase())"
+              size="sm"
+              @click="openAdmission(e)"
+            >
+              Admit to ward
+            </BaseButton>
           </div>
         </div>
 
@@ -259,7 +269,7 @@
       :open="open"
       title="New emergency case"
       description="Patient ID is optional until identity is established."
-      @close="open = false"
+      @close="closeCreateCase"
     >
       <form
         @submit.prevent="save"
@@ -334,31 +344,18 @@
 
 
         <div class="sm:col-span-2">
-          <FormField label="Known patient (optional)">
-            <BaseSelect
-              v-model="f.patientId"
-            >
-              <option value="">
-                Unknown
-              </option>
-
-              <option
-                v-for="p in patients"
-                :key="p.patient_id"
-                :value="p.patient_id"
-              >
-                {{ p.patient_number }}
-                —
-                {{ p.first_name }}
-                {{ p.last_name }}
-              </option>
-            </BaseSelect>
-          </FormField>
+          <PatientLookup
+            v-model="selectedPatient"
+            :patients="lookupPatients"
+            label="Known patient (optional)"
+            placeholder="Search by name, patient number or NIC..."
+          />
+          <p class="mt-1 text-xs text-slate-500">Leave blank if the patient's identity is unknown.</p>
         </div>
 
 
         <div
-          v-if="!f.patientId"
+          v-if="!selectedPatient"
           class="sm:col-span-2"
         >
           <FormField
@@ -390,6 +387,50 @@
             }}
           </BaseButton>
         </div>
+      </form>
+    </Modal>
+
+
+    <Modal
+      :open="!!admissionCase"
+      title="Admit emergency patient"
+      description="Select an available inpatient bed and an attending doctor for the identified patient."
+      @close="admissionCase = null"
+    >
+      <form v-if="admissionCase" class="space-y-4" @submit.prevent="submitAdmission">
+        <p class="rounded-xl bg-slate-50 p-3 text-sm font-semibold">
+          {{ admissionCase.patient_name || admissionCase.patient_number }} · {{ admissionCase.case_number }}
+        </p>
+        <FormField label="Ward" required>
+          <BaseSelect v-model="admissionWardId" required :disabled="admissionSaving">
+            <option value="">Select a ward</option>
+            <option v-for="ward in admissionWards" :key="ward.ward_id" :value="String(ward.ward_id)">
+              {{ ward.ward_name }}{{ ward.ward_type ? ` · ${ward.ward_type}` : '' }}
+            </option>
+          </BaseSelect>
+        </FormField>
+        <FormField label="Available bed" required>
+          <BaseSelect v-model="admissionBedId" required :disabled="admissionSaving || !admissionWardId">
+            <option value="">Select a bed</option>
+            <option v-for="bed in availableAdmissionBeds" :key="bed.bed_id" :value="String(bed.bed_id)">
+              {{ bed.bed_number }}
+            </option>
+          </BaseSelect>
+        </FormField>
+        <FormField v-if="role !== 'DOCTOR'" label="Attending doctor" required>
+          <BaseSelect v-model="admissionDoctorId" required :disabled="admissionSaving">
+            <option value="">Select an assigned doctor</option>
+            <option v-for="doctor in admissionDoctors" :key="doctor.userId" :value="String(doctor.userId)">
+              {{ doctor.fullName }}
+            </option>
+          </BaseSelect>
+          <p v-if="!admissionDoctors.length" class="mt-1 text-xs text-amber-700">No doctor is assigned to this hospital. Add one in Settings.</p>
+        </FormField>
+        <p v-if="admissionError" class="text-sm text-red-700">{{ admissionError }}</p>
+        <BaseButton type="submit" block :loading="admissionSaving"
+          :disabled="admissionSaving || !admissionWardId || !admissionBedId || (role !== 'DOCTOR' && !admissionDoctorId)">
+          Confirm admission
+        </BaseButton>
       </form>
     </Modal>
 
@@ -878,6 +919,7 @@ import {
   onMounted,
   reactive,
   ref,
+  watch,
 } from "vue";
 
 import {
@@ -905,6 +947,7 @@ import StatusBadge from "../components/ui/StatusBadge.vue";
 
 
 import FormField from "../components/forms/FormField.vue";
+import PatientLookup from "../components/patient/PatientLookup.vue";
 
 
 import {
@@ -936,9 +979,7 @@ const canAccessEmergency = [
   "HOSPITAL_ADMIN",
   "SYSTEM_ADMIN",
 ].includes(role);
-const canManageEmergency =
-  role === "DOCTOR" ||
-  (import.meta.env.DEV && role === "SYSTEM_ADMIN");
+const canManageEmergency = ref(role === "DOCTOR");
 
 
 interface EmergencyCase {
@@ -988,7 +1029,20 @@ interface Patient {
   first_name: string;
 
   last_name: string;
+
+  nic_number?: string | null;
+
+  primary_phone?: string | null;
 }
+
+type LookupPatient = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  patientNumber: string;
+  nic: string;
+  phone: string;
+};
 
 
 interface EmergencyLocation {
@@ -1081,6 +1135,16 @@ const patients =
     [],
   );
 
+const lookupPatients = computed<LookupPatient[]>(() => patients.value.map((patient) => ({
+  id: String(patient.patient_id),
+  firstName: patient.first_name,
+  lastName: patient.last_name,
+  patientNumber: patient.patient_number,
+  nic: patient.nic_number || "",
+  phone: patient.primary_phone || "",
+})));
+const selectedPatient = ref<LookupPatient | null>(null);
+
 
 const loading =
   ref(false);
@@ -1094,6 +1158,23 @@ const error =
 
 const open =
   ref(false);
+
+type AdmissionWard = { ward_id: number; ward_name: string; ward_type: string | null };
+type AdmissionBed = { bed_id: number; bed_number: string; status: string };
+type AdmissionDoctor = { userId: number; fullName: string };
+const admissionCase = ref<EmergencyCase | null>(null);
+const admissionWards = ref<AdmissionWard[]>([]);
+const admissionBeds = ref<Record<number, AdmissionBed[]>>({});
+const admissionDoctors = ref<AdmissionDoctor[]>([]);
+const admissionWardId = ref("");
+const admissionBedId = ref("");
+const admissionDoctorId = ref("");
+const admissionSaving = ref(false);
+const admissionError = ref("");
+const availableAdmissionBeds = computed(() =>
+  (admissionBeds.value[Number(admissionWardId.value)] || []).filter((bed) => bed.status === "AVAILABLE"),
+);
+watch(admissionWardId, () => { admissionBedId.value = ""; });
 
 
 /*
@@ -1181,10 +1262,18 @@ const f = reactive({
   status:
     "IDENTIFICATION_PENDING",
 
-  patientId: "",
-
   temporaryIdentityReference: "",
 });
+
+function openCreateCase() {
+  resetForm();
+  open.value = true;
+}
+
+function closeCreateCase() {
+  open.value = false;
+  resetForm();
+}
 
 
 /* ============================================================
@@ -1235,6 +1324,61 @@ async function loadEmergencies() {
   }
 }
 
+async function openAdmission(emergencyCase: EmergencyCase) {
+  admissionCase.value = emergencyCase;
+  admissionWardId.value = "";
+  admissionBedId.value = "";
+  admissionDoctorId.value = "";
+  admissionWards.value = [];
+  admissionBeds.value = {};
+  admissionDoctors.value = [];
+  admissionError.value = "";
+  try {
+    const hospitalId = getHospitalId();
+    const [wardsResponse, doctorsResponse] = await Promise.all([
+      apiGet<{ data?: AdmissionWard[] }>(`/wards/hospital/${hospitalId}`),
+      role === "DOCTOR"
+        ? Promise.resolve({ data: [] as AdmissionDoctor[] })
+        : apiGet<{ data?: AdmissionDoctor[] }>("/providers?role=DOCTOR"),
+    ]);
+    const wards = (wardsResponse.data || []).filter(
+      (ward) => String(ward.ward_type || "").toUpperCase() !== "EMERGENCY",
+    );
+    admissionWards.value = wards;
+    admissionDoctors.value = doctorsResponse.data || [];
+    const bedRows = await Promise.all(wards.map((ward) =>
+      apiGet<{ data?: AdmissionBed[] }>(`/wards/${ward.ward_id}/beds`),
+    ));
+    admissionBeds.value = Object.fromEntries(wards.map((ward, index) => [
+      ward.ward_id, bedRows[index]?.data || [],
+    ]));
+    if (!wards.length) admissionError.value = "No inpatient wards are available for this hospital.";
+  } catch (cause) {
+    admissionError.value = cause instanceof Error ? cause.message : "Unable to load wards and doctors.";
+  }
+}
+
+async function submitAdmission() {
+  if (!admissionCase.value || !admissionWardId.value || !admissionBedId.value ||
+      (role !== "DOCTOR" && !admissionDoctorId.value) || admissionSaving.value) return;
+  admissionSaving.value = true;
+  admissionError.value = "";
+  try {
+    await apiPost(`/admissions/from-emergency/${admissionCase.value.emergency_case_id}`, {
+      wardId: Number(admissionWardId.value),
+      bedId: Number(admissionBedId.value),
+      ...(admissionDoctorId.value ? { attendingDoctorId: Number(admissionDoctorId.value) } : {}),
+      admissionReason: admissionCase.value.chief_complaint || null,
+    });
+    admissionCase.value = null;
+    await loadEmergencies();
+  } catch (cause) {
+    admissionError.value = cause instanceof Error ? cause.message : "Unable to admit the patient.";
+  } finally {
+    admissionSaving.value = false;
+  }
+}
+
 
 /* ============================================================
    LOAD PATIENTS
@@ -1270,8 +1414,7 @@ async function save() {
     true;
 
   try {
-    const isUnidentified =
-      !f.patientId;
+    const isUnidentified = !selectedPatient.value;
 
 
     const payload = {
@@ -1279,7 +1422,7 @@ async function save() {
         isUnidentified
           ? null
           : Number(
-              f.patientId,
+              selectedPatient.value?.id,
             ),
 
       caseNumber:
@@ -1414,13 +1557,11 @@ function resetForm() {
       status:
         "IDENTIFICATION_PENDING",
 
-      patientId:
-        "",
-
       temporaryIdentityReference:
         "",
     },
   );
+  selectedPatient.value = null;
 }
 
 
@@ -1697,9 +1838,18 @@ onMounted(async () => {
     return;
   }
 
+  if (role === "SYSTEM_ADMIN") {
+    try {
+      const context = await apiGet<{ data?: { allModuleAccess?: boolean } }>("/auth/context");
+      canManageEmergency.value = context.data?.allModuleAccess === true;
+    } catch {
+      canManageEmergency.value = false;
+    }
+  }
+
   await Promise.all([
     loadEmergencies(),
-    ...(canManageEmergency ? [loadPatients()] : []),
+    ...(canManageEmergency.value ? [loadPatients()] : []),
   ]);
 });
 </script>

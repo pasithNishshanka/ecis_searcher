@@ -213,6 +213,12 @@ const nav = [
   },
 
   {
+    path: "/pharmacy",
+    label: "Pharmacy",
+    icon: Pill,
+  },
+
+  {
     path: "/surgery",
     label: "Surgery & Procedures",
     icon: Scissors,

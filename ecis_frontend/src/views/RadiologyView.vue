@@ -1779,6 +1779,13 @@ async function uploadImages(
     return;
   }
 
+  if (files.length > 10) {
+    error.value =
+      "Choose no more than 10 images at a time.";
+
+    return;
+  }
+
   const allowedMimeTypes = new Set([
     "image/jpeg",
     "image/png",

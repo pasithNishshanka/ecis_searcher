@@ -1,5 +1,38 @@
 const pool = require("../config/database");
 
+function positiveInteger(value, fieldName) {
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new Error(`${fieldName} must be a positive integer`);
+  }
+  return parsed;
+}
+
+async function validateAttendingDoctor(client, doctorId, hospitalId) {
+  const result = await client.query(
+    `SELECT u.user_id
+       FROM public.hospital_users u
+       JOIN public.hospital_user_assignments a ON a.user_id = u.user_id
+      WHERE u.user_id = $1 AND u.is_active = TRUE
+        AND a.hospital_id = $2 AND a.role = 'DOCTOR'
+        AND a.status = 'ACTIVE' AND a.start_date <= CURRENT_DATE
+        AND (a.end_date IS NULL OR a.end_date >= CURRENT_DATE)
+      LIMIT 1 FOR SHARE OF u, a;`,
+    [doctorId, hospitalId],
+  );
+  if (!result.rowCount) {
+    throw new Error("Select an active attending doctor for this hospital");
+  }
+}
+
+async function allocateAdmissionIdentity(client, hospitalId) {
+  const result = await client.query(
+    `SELECT nextval(pg_get_serial_sequence('public.admissions', 'admission_id')) AS admission_id;`,
+  );
+  const admissionId = Number(result.rows[0].admission_id);
+  return { admissionId, admissionNumber: `ADM-${hospitalId}-${String(admissionId).padStart(8, "0")}` };
+}
+
 /**
  * Create a normal inpatient admission.
  *
@@ -20,17 +53,22 @@ async function createAdmission(admissionData) {
     hospitalId,
     wardId,
     bedId,
-    admissionNumber,
     admissionDate,
     admissionReason,
     admissionDiagnosis,
     attendingDoctorId,
   } = admissionData;
+  const validHospitalId = positiveInteger(hospitalId, "hospitalId");
+  const validDoctorId = positiveInteger(attendingDoctorId, "attendingDoctorId");
+  const actorUserId = positiveInteger(admissionData.actorUserId, "actorUserId");
 
   const client = await pool.connect();
 
   try {
     await client.query("BEGIN");
+
+    // Serialize admission attempts for the same patient, even if different beds are chosen.
+    await client.query("SELECT pg_advisory_xact_lock(714229, $1::int);", [patientId]);
 
     const patientResult = await client.query(
       `
@@ -58,6 +96,8 @@ async function createAdmission(admissionData) {
     if (patientResult.rowCount === 0) {
       throw new Error("Active patient not found for the selected hospital");
     }
+
+    await validateAttendingDoctor(client, validDoctorId, validHospitalId);
 
     const wardResult = await client.query(
       `
@@ -136,6 +176,8 @@ async function createAdmission(admissionData) {
       throw new Error("Patient already has an active admission");
     }
 
+    const identity = await allocateAdmissionIdentity(client, validHospitalId);
+
     const encounterResult = await client.query(
       `
           INSERT INTO public.encounters (
@@ -177,6 +219,7 @@ async function createAdmission(admissionData) {
     const admissionResult = await client.query(
       `
           INSERT INTO public.admissions (
+            admission_id,
             patient_id,
             encounter_id,
             ward_id,
@@ -194,27 +237,29 @@ async function createAdmission(admissionData) {
             $3,
             $4,
             $5,
+            $6,
             COALESCE(
-              $6::timestamp,
+              $7::timestamp,
               CURRENT_TIMESTAMP
             ),
-            $7,
             $8,
             $9,
+            $10,
             'ADMITTED'
           )
           RETURNING *;
         `,
       [
+        identity.admissionId,
         patientId,
         encounterId,
         wardId,
         bedId,
-        admissionNumber,
+        identity.admissionNumber,
         admissionDate || null,
         admissionReason || null,
         admissionDiagnosis || null,
-        attendingDoctorId || null,
+        validDoctorId,
       ],
     );
 
@@ -241,6 +286,14 @@ async function createAdmission(admissionData) {
     if (occupiedResult.rowCount === 0) {
       throw new Error("Unable to mark the selected bed as occupied.");
     }
+
+    await client.query(
+      `INSERT INTO public.audit_logs (
+         hospital_id, user_id, action_type, entity_type, entity_id, new_values
+       ) VALUES ($1, $2, 'ADMISSION_CREATED', 'admission', $3, $4::jsonb);`,
+      [validHospitalId, actorUserId, admission.admission_id,
+        JSON.stringify({ patientId, wardId, bedId, attendingDoctorId: validDoctorId })],
+    );
 
     await client.query("COMMIT");
 
@@ -298,12 +351,14 @@ async function createEmergencyAdmission(admissionData) {
     hospitalId,
     wardId,
     bedId,
-    admissionNumber,
     admissionDate,
     admissionReason,
     admissionDiagnosis,
     attendingDoctorId,
   } = admissionData;
+  const validHospitalId = positiveInteger(hospitalId, "hospitalId");
+  const validDoctorId = positiveInteger(attendingDoctorId, "attendingDoctorId");
+  const actorUserId = positiveInteger(admissionData.actorUserId, "actorUserId");
 
   const client = await pool.connect();
 
@@ -391,6 +446,10 @@ async function createEmergencyAdmission(admissionData) {
     }
 
     const patient = patientResult.rows[0];
+
+    await validateAttendingDoctor(client, validDoctorId, validHospitalId);
+
+    await client.query("SELECT pg_advisory_xact_lock(714229, $1::int);", [patient.patient_id]);
 
     /*
      * --------------------------------------------------------
@@ -553,6 +612,18 @@ async function createEmergencyAdmission(admissionData) {
      */
     let encounterId = emergencyCase.encounter_id;
 
+    if (encounterId) {
+      const existingEncounter = await client.query(
+        `SELECT encounter_id FROM public.encounters
+          WHERE encounter_id = $1 AND patient_id = $2 AND hospital_id = $3
+          FOR UPDATE;`,
+        [encounterId, patient.patient_id, validHospitalId],
+      );
+      if (!existingEncounter.rowCount) {
+        throw new Error("Emergency encounter does not match the identified patient and hospital");
+      }
+    }
+
     if (!encounterId) {
       const encounterResult = await client.query(
         `
@@ -608,13 +679,11 @@ async function createEmergencyAdmission(admissionData) {
 
     /*
      * --------------------------------------------------------
-     * 9. Generate admission number when not supplied
+     * 9. Allocate the admission number on the server
      * --------------------------------------------------------
      */
-    const finalAdmissionNumber =
-      admissionNumber && String(admissionNumber).trim()
-        ? String(admissionNumber).trim()
-        : `ADM-EMG-${emergencyCaseId}-${Date.now()}`;
+    const identity = await allocateAdmissionIdentity(client, validHospitalId);
+    const finalAdmissionNumber = identity.admissionNumber;
 
     /*
      * --------------------------------------------------------
@@ -624,6 +693,7 @@ async function createEmergencyAdmission(admissionData) {
     const admissionResult = await client.query(
       `
           INSERT INTO public.admissions (
+            admission_id,
             patient_id,
             encounter_id,
             ward_id,
@@ -641,18 +711,20 @@ async function createEmergencyAdmission(admissionData) {
             $3,
             $4,
             $5,
+            $6,
             COALESCE(
-              $6::timestamp,
+              $7::timestamp,
               CURRENT_TIMESTAMP
             ),
-            $7,
             $8,
             $9,
+            $10,
             'ADMITTED'
           )
           RETURNING *;
         `,
       [
+        identity.admissionId,
         patient.patient_id,
         encounterId,
         wardId,
@@ -661,7 +733,7 @@ async function createEmergencyAdmission(admissionData) {
         admissionDate || null,
         admissionReason || emergencyCase.chief_complaint || null,
         admissionDiagnosis || null,
-        attendingDoctorId || null,
+        validDoctorId,
       ],
     );
 
@@ -763,7 +835,7 @@ async function createEmergencyAdmission(admissionData) {
         emergencyCaseId,
         bedId,
         newLocationType,
-        attendingDoctorId || null,
+        actorUserId,
         `Inpatient admission ${finalAdmissionNumber}`,
       ],
     );
@@ -788,6 +860,15 @@ async function createEmergencyAdmission(admissionData) {
           emergency_case_id = $1;
       `,
       [emergencyCaseId],
+    );
+
+    await client.query(
+      `INSERT INTO public.audit_logs (
+         hospital_id, user_id, action_type, entity_type, entity_id, new_values
+       ) VALUES ($1, $2, 'EMERGENCY_ADMISSION_CREATED', 'admission', $3, $4::jsonb);`,
+      [validHospitalId, actorUserId, admission.admission_id,
+        JSON.stringify({ emergencyCaseId, patientId: patient.patient_id,
+          wardId, bedId, attendingDoctorId: validDoctorId })],
     );
 
     await client.query("COMMIT");
@@ -823,7 +904,9 @@ async function dischargeAdmission({
   admissionId,
   dischargeDiagnosis,
   dischargeSummary,
+  actorUserId,
 }) {
+  const validActorUserId = positiveInteger(actorUserId, "actorUserId");
   const client = await pool.connect();
 
   try {
@@ -919,7 +1002,7 @@ async function dischargeAdmission({
 
     const encounter = encounterResult.rows[0];
 
-    if (encounter.status !== "OPEN" && encounter.status !== "COMPLETED") {
+    if (!["OPEN", "ADMITTED", "COMPLETED"].includes(encounter.status)) {
       throw new Error(
         `The admission's encounter cannot be completed from its current status: ${encounter.status}`,
       );
@@ -1056,6 +1139,15 @@ async function dischargeAdmission({
         [emergencyCase.emergency_case_id],
       );
     }
+
+    await client.query(
+      `INSERT INTO public.audit_logs (
+         hospital_id, user_id, action_type, entity_type, entity_id, new_values
+       ) VALUES ($1, $2, 'ADMISSION_DISCHARGED', 'admission', $3, $4::jsonb);`,
+      [hospitalId, validActorUserId, admissionId,
+        JSON.stringify({ patientId: admission.patient_id,
+          encounterId: admission.encounter_id, bedId: admission.bed_id })],
+    );
 
     await client.query("COMMIT");
 
@@ -1204,299 +1296,6 @@ async function getAdmissionById(hospitalId, admissionId) {
   const result = await pool.query(query, [admissionId, hospitalId]);
 
   return result.rows[0] || null;
-}
-
-/**
- * Discharge an admitted inpatient.
- *
- * All related changes are performed in one transaction so the admission,
- * encounter, bed and emergency episode remain consistent.
- */
-async function dischargeAdmission({
-  hospitalId,
-  admissionId,
-  dischargeDiagnosis,
-  dischargeSummary,
-}) {
-  const client = await pool.connect();
-
-  try {
-    await client.query("BEGIN");
-
-    const admissionResult = await client.query(
-      `
-          SELECT
-            a.admission_id,
-            a.patient_id,
-            a.encounter_id,
-            a.ward_id,
-            a.bed_id,
-            a.admission_number,
-            a.admission_date,
-            a.status,
-            w.hospital_id,
-            w.ward_name,
-            w.ward_type
-          FROM public.admissions a
-          INNER JOIN public.wards w
-            ON w.ward_id = a.ward_id
-          WHERE
-            a.admission_id = $1
-            AND w.hospital_id = $2
-          FOR UPDATE OF a;
-        `,
-      [admissionId, hospitalId],
-    );
-
-    if (admissionResult.rowCount === 0) {
-      throw new Error("Admission not found for the authenticated hospital");
-    }
-
-    const admission = admissionResult.rows[0];
-
-    if (admission.status !== "ADMITTED") {
-      throw new Error(
-        `Admission cannot be discharged because its current status is ${admission.status}`,
-      );
-    }
-
-    const bedResult = await client.query(
-      `
-          SELECT
-            bed_id,
-            ward_id,
-            bed_number,
-            status
-          FROM public.beds
-          WHERE
-            bed_id = $1
-            AND ward_id = $2
-          FOR UPDATE;
-        `,
-      [admission.bed_id, admission.ward_id],
-    );
-
-    if (bedResult.rowCount === 0) {
-      throw new Error("Admission bed could not be found.");
-    }
-
-    const bed = bedResult.rows[0];
-
-    if (bed.status !== "OCCUPIED") {
-      throw new Error(
-        `Admission bed is not currently occupied. Current status: ${bed.status}`,
-      );
-    }
-
-    const encounterResult = await client.query(
-      `
-          SELECT
-            encounter_id,
-            patient_id,
-            hospital_id,
-            status
-          FROM public.encounters
-          WHERE
-            encounter_id = $1
-            AND patient_id = $2
-            AND hospital_id = $3
-          FOR UPDATE;
-        `,
-      [admission.encounter_id, admission.patient_id, hospitalId],
-    );
-
-    if (encounterResult.rowCount === 0) {
-      throw new Error(
-        "The admission's encounter could not be found for the authenticated hospital.",
-      );
-    }
-
-    const encounter = encounterResult.rows[0];
-
-    if (encounter.status !== "OPEN" && encounter.status !== "COMPLETED") {
-      throw new Error(
-        `The admission's encounter cannot be completed from its current status: ${encounter.status}`,
-      );
-    }
-
-    /*
-     * Determine whether this admission belongs
-     * to an emergency episode.
-     */
-    const emergencyResult = await client.query(
-      `
-          SELECT
-            emergency_case_id,
-            encounter_id,
-            patient_id,
-            status
-          FROM public.emergency_cases
-          WHERE
-            encounter_id = $1
-            AND hospital_id = $2
-          FOR UPDATE;
-        `,
-      [admission.encounter_id, hospitalId],
-    );
-
-    const emergencyCase =
-      emergencyResult.rowCount > 0 ? emergencyResult.rows[0] : null;
-
-    /*
-     * Close the active emergency physical location
-     * when this admission originated from emergency.
-     */
-    if (emergencyCase) {
-      const locationResult = await client.query(
-        `
-            SELECT
-              emergency_case_location_id,
-              emergency_case_id,
-              bed_id,
-              location_type
-            FROM public.emergency_case_locations
-            WHERE
-              emergency_case_id = $1
-              AND ended_at IS NULL
-            FOR UPDATE;
-          `,
-        [emergencyCase.emergency_case_id],
-      );
-
-      if (locationResult.rowCount > 0) {
-        const activeLocation = locationResult.rows[0];
-
-        if (Number(activeLocation.bed_id) !== Number(admission.bed_id)) {
-          throw new Error(
-            "The active emergency location bed does not match the admission bed.",
-          );
-        }
-
-        await client.query(
-          `
-            UPDATE public.emergency_case_locations
-            SET
-              ended_at = CURRENT_TIMESTAMP
-            WHERE
-              emergency_case_location_id = $1
-              AND ended_at IS NULL;
-          `,
-          [activeLocation.emergency_case_location_id],
-        );
-      }
-    }
-
-    /*
-     * Mark admission as discharged.
-     */
-    const updatedAdmissionResult = await client.query(
-      `
-          UPDATE public.admissions
-          SET
-            status = 'DISCHARGED',
-            discharge_date = CURRENT_TIMESTAMP,
-            discharge_diagnosis = $2,
-            discharge_summary = $3
-          WHERE
-            admission_id = $1
-            AND status = 'ADMITTED'
-          RETURNING *;
-        `,
-      [admissionId, dischargeDiagnosis, dischargeSummary],
-    );
-
-    if (updatedAdmissionResult.rowCount === 0) {
-      throw new Error(
-        "The admission could not be discharged because its status changed during the operation.",
-      );
-    }
-
-    /*
-     * Complete the associated clinical encounter.
-     */
-    await client.query(
-      `
-        UPDATE public.encounters
-        SET
-          status = 'COMPLETED'
-        WHERE
-          encounter_id = $1
-          AND patient_id = $2
-          AND hospital_id = $3;
-      `,
-      [admission.encounter_id, admission.patient_id, hospitalId],
-    );
-
-    /*
-     * Release the occupied bed.
-     */
-    const releasedBedResult = await client.query(
-      `
-          UPDATE public.beds
-          SET
-            status = 'AVAILABLE',
-            updated_at = CURRENT_TIMESTAMP
-          WHERE
-            bed_id = $1
-            AND ward_id = $2
-            AND status = 'OCCUPIED'
-          RETURNING
-            bed_id,
-            bed_number,
-            status;
-        `,
-      [admission.bed_id, admission.ward_id],
-    );
-
-    if (releasedBedResult.rowCount === 0) {
-      throw new Error("Unable to release the admission bed.");
-    }
-
-    /*
-     * Only now, after inpatient discharge, close the
-     * emergency episode when applicable.
-     */
-    if (emergencyCase) {
-      await client.query(
-        `
-          UPDATE public.emergency_cases
-          SET
-            status = 'DISCHARGED',
-            updated_at = CURRENT_TIMESTAMP
-          WHERE
-            emergency_case_id = $1;
-        `,
-        [emergencyCase.emergency_case_id],
-      );
-    }
-
-    await client.query("COMMIT");
-
-    return {
-      admission: updatedAdmissionResult.rows[0],
-
-      bed: releasedBedResult.rows[0],
-
-      encounter: {
-        encounterId: admission.encounter_id,
-        status: "COMPLETED",
-      },
-
-      emergencyCase: emergencyCase
-        ? {
-            emergencyCaseId: emergencyCase.emergency_case_id,
-
-            status: "DISCHARGED",
-          }
-        : null,
-    };
-  } catch (error) {
-    await client.query("ROLLBACK");
-
-    throw error;
-  } finally {
-    client.release();
-  }
 }
 
 module.exports = {

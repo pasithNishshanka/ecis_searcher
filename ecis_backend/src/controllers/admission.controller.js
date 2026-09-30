@@ -72,7 +72,6 @@ async function createAdmission(
       patientId,
       wardId,
       bedId,
-      admissionNumber,
       admissionDate,
       admissionReason,
       admissionDiagnosis,
@@ -112,14 +111,14 @@ async function createAdmission(
       });
     }
 
-    if (
-      !admissionNumber ||
-      !String(admissionNumber).trim()
-    ) {
+    const actorUserId = getAuthenticatedUserId(req);
+    const selectedDoctorId = req.user?.role === "DOCTOR"
+      ? actorUserId
+      : parsePositiveInteger(attendingDoctorId);
+    if (!actorUserId || !selectedDoctorId) {
       return res.status(400).json({
         success: false,
-        message:
-          "admissionNumber is required.",
+        message: "Select an attending doctor assigned to this hospital.",
       });
     }
 
@@ -137,11 +136,6 @@ async function createAdmission(
         bedId:
           parsedBedId,
 
-        admissionNumber:
-          String(
-            admissionNumber,
-          ).trim(),
-
         admissionDate:
           admissionDate || null,
 
@@ -151,12 +145,8 @@ async function createAdmission(
         admissionDiagnosis:
           admissionDiagnosis || null,
 
-        attendingDoctorId:
-          attendingDoctorId
-            ? parsePositiveInteger(
-                attendingDoctorId,
-              )
-            : null,
+        attendingDoctorId: selectedDoctorId,
+        actorUserId,
       });
 
     return res.status(201).json({
@@ -166,6 +156,9 @@ async function createAdmission(
       data: result,
     });
   } catch (error) {
+    if (error?.message === "Select an active attending doctor for this hospital") {
+      return res.status(400).json({ success: false, message: error.message });
+    }
     if (
       error?.code === "23505"
     ) {
@@ -267,6 +260,16 @@ async function createEmergencyAdmission(
       });
     }
 
+    const attendingDoctorId = req.user?.role === "DOCTOR"
+      ? userId
+      : parsePositiveInteger(req.body.attendingDoctorId);
+    if (!attendingDoctorId) {
+      return res.status(400).json({
+        success: false,
+        message: "Select an attending doctor assigned to this hospital.",
+      });
+    }
+
     const result =
       await admissionService.createEmergencyAdmission({
         emergencyCaseId,
@@ -276,10 +279,6 @@ async function createEmergencyAdmission(
         wardId,
 
         bedId,
-
-        admissionNumber:
-          req.body.admissionNumber ||
-          null,
 
         admissionDate:
           req.body.admissionDate ||
@@ -293,12 +292,8 @@ async function createEmergencyAdmission(
           req.body.admissionDiagnosis ||
           null,
 
-        attendingDoctorId:
-          req.body.attendingDoctorId
-            ? parsePositiveInteger(
-                req.body.attendingDoctorId,
-              )
-            : userId,
+        attendingDoctorId,
+        actorUserId: userId,
       });
 
     return res.status(201).json({
@@ -308,6 +303,9 @@ async function createEmergencyAdmission(
       data: result,
     });
   } catch (error) {
+    if (error?.message === "Select an active attending doctor for this hospital") {
+      return res.status(400).json({ success: false, message: error.message });
+    }
     if (
       error?.code === "23505"
     ) {
@@ -427,6 +425,8 @@ async function dischargeAdmission(
         hospitalId,
 
         admissionId,
+
+        actorUserId: getAuthenticatedUserId(req),
 
         dischargeDiagnosis,
 

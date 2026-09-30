@@ -238,10 +238,23 @@
           · {{ selectedPatient }}
         </div>
 
+        <FormField v-if="requiresDoctorSelection" class="mt-4" label="Attending doctor" required>
+          <BaseSelect v-model="selectedDoctorId" required>
+            <option value="">Select an assigned doctor</option>
+            <option v-for="doctor in doctorOptions" :key="doctor.userId" :value="String(doctor.userId)">
+              {{ doctor.fullName }}{{ doctor.designation ? ` · ${doctor.designation}` : '' }}
+            </option>
+          </BaseSelect>
+          <p v-if="!doctorOptions.length" class="muted mt-1">No doctor is assigned to this hospital. Add one in Settings.</p>
+        </FormField>
+
+        <p v-if="assignmentError" class="mt-3 text-sm text-red-700">{{ assignmentError }}</p>
+
         <BaseButton
           block
           class="mt-4"
-          :disabled="!selectedPatient"
+          :disabled="!selectedPatient || (requiresDoctorSelection && !selectedDoctorId) || assigning"
+          :loading="assigning"
           @click="assign"
         >
           Assign selected patient
@@ -368,11 +381,13 @@ import { Plus, UserPlus } from 'lucide-vue-next'
 import PageHeader from '../components/PageHeader.vue'
 import BaseButton from '../components/ui/BaseButton.vue'
 import BaseInput from '../components/ui/BaseInput.vue'
+import BaseSelect from '../components/ui/BaseSelect.vue'
 import BaseTextarea from '../components/ui/BaseTextarea.vue'
 import FormField from '../components/forms/FormField.vue'
 import StatCard from '../components/StatCard.vue'
 import Modal from '../components/Modal.vue'
 import { useEHR } from '../stores/ehr'
+import { apiGet } from '../services/api'
 
 const Info = {
   props: ['label', 'value'],
@@ -396,6 +411,18 @@ const showWardForm = ref(false)
 const assignment = ref<any>(null)
 const patientSearch = ref('')
 const selectedPatient = ref('')
+type DoctorOption = { userId: number; fullName: string; designation: string | null }
+const doctorOptions = ref<DoctorOption[]>([])
+const selectedDoctorId = ref('')
+const assignmentError = ref('')
+const assigning = ref(false)
+const requiresDoctorSelection = (() => {
+  try {
+    return String(JSON.parse(localStorage.getItem('ecis-user') || '{}').role || '').toUpperCase() !== 'DOCTOR'
+  } catch {
+    return true
+  }
+})()
 const patientDetail = ref<any>(null)
 
 const dischargeTarget = ref<any>(null)
@@ -431,17 +458,17 @@ const available = computed(() =>
   totalBeds.value - occupied.value,
 )
 
-const patientMatches = computed(() =>
-  patients.value
+const patientMatches = computed(() => {
+  const query = patientSearch.value.trim().toLowerCase()
+  if (!query) return []
+  return patients.value
     .filter((p) =>
       `${p.firstName} ${p.lastName} ${p.patientNumber} ${p.nic}`
         .toLowerCase()
-        .includes(
-          patientSearch.value.toLowerCase(),
-        ),
+        .includes(query),
     )
-    .slice(0, 20),
-)
+    .slice(0, 20)
+})
 
 const canSubmitDischarge = computed(() =>
   !!dischargeTarget.value?.admissionId &&
@@ -500,7 +527,7 @@ async function saveWard() {
   }
 }
 
-function openAssignment(
+async function openAssignment(
   w: any,
   b: any,
 ) {
@@ -511,32 +538,46 @@ function openAssignment(
 
   patientSearch.value = ''
   selectedPatient.value = ''
+  selectedDoctorId.value = ''
+  assignmentError.value = ''
+  doctorOptions.value = []
+  if (requiresDoctorSelection) {
+    try {
+      const response = await apiGet<{ data?: DoctorOption[] }>('/providers?role=DOCTOR')
+      doctorOptions.value = response.data || []
+    } catch (error) {
+      assignmentError.value = error instanceof Error ? error.message : 'Unable to load assigned doctors.'
+    }
+  }
 }
 
 async function assign() {
   if (
     !assignment.value ||
-    !selectedPatient.value
+    !selectedPatient.value ||
+    (requiresDoctorSelection && !selectedDoctorId.value) ||
+    assigning.value
   ) {
     return
   }
 
+  assigning.value = true
+  assignmentError.value = ''
   try {
     await assignBed(
       assignment.value.w.id,
       assignment.value.b.id,
       selectedPatient.value,
+      selectedDoctorId.value || undefined,
     )
 
     assignment.value = null
     patientSearch.value = ''
     selectedPatient.value = ''
   } catch (error) {
-    window.alert(
-      error instanceof Error
-        ? error.message
-        : 'Unable to assign patient to the bed.',
-    )
+    assignmentError.value = error instanceof Error ? error.message : 'Unable to assign patient to the bed.'
+  } finally {
+    assigning.value = false
   }
 }
 

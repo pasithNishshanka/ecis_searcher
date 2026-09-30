@@ -1296,6 +1296,7 @@ export function useEHR() {
     wardId: string,
     bedId: string,
     patientId: string,
+    attendingDoctorId?: string,
   ) {
     const hospitalId =
       getHospitalId();
@@ -1314,8 +1315,6 @@ export function useEHR() {
             patientId,
           ),
 
-        hospitalId,
-
         wardId:
           Number(
             wardId,
@@ -1326,8 +1325,7 @@ export function useEHR() {
             bedId,
           ),
 
-        admissionNumber:
-          `ADM-${Date.now()}`,
+        ...(attendingDoctorId ? { attendingDoctorId: Number(attendingDoctorId) } : {}),
       },
     );
 

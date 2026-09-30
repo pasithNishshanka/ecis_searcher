@@ -13,7 +13,7 @@ after(() => {
   else process.env.ECIS_EXAM_FULL_ACCESS = originalFullAccess;
 });
 
-function checkRole(role) {
+function checkRole(role, allowedRoles = ["DOCTOR"]) {
   let status;
   let passed = false;
   const response = {
@@ -25,7 +25,7 @@ function checkRole(role) {
       return this;
     },
   };
-  authorizeRoles("DOCTOR")({ user: role ? { role } : null }, response, () => {
+  authorizeRoles(...allowedRoles)({ user: role ? { role } : null }, response, () => {
     passed = true;
   });
   return { status, passed };
@@ -49,4 +49,19 @@ test("local access cannot bypass production authorization", () => {
   assert.equal(hasLocalSystemAdminAccess("SYSTEM_ADMIN"), false);
   assert.deepEqual(checkRole("SYSTEM_ADMIN"), { status: 403, passed: false });
   assert.deepEqual(checkRole("DOCTOR"), { status: undefined, passed: true });
+});
+
+test("one local system administrator account can pass every module role gate", () => {
+  process.env.NODE_ENV = "development";
+  process.env.ECIS_EXAM_FULL_ACCESS = "true";
+  for (const moduleRole of [
+    "DOCTOR", "NURSE", "ADMIN", "SURGEON", "LAB_TECHNICIAN",
+    "RADIOLOGIST", "PHARMACIST", "ECIS_SEARCHER", "RECEPTIONIST",
+  ]) {
+    assert.deepEqual(
+      checkRole("SYSTEM_ADMIN", [moduleRole]),
+      { status: undefined, passed: true },
+      `SYSTEM_ADMIN should pass the ${moduleRole} gate locally`,
+    );
+  }
 });

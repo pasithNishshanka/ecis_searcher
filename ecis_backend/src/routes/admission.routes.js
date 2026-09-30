@@ -1,4 +1,5 @@
 const express = require("express");
+const { authorizeRoles } = require("../middleware/authorization.middleware");
 
 const {
   createAdmission,
@@ -20,6 +21,7 @@ const router = express.Router();
  */
 router.post(
   "/",
+  authorizeRoles("DOCTOR", "NURSE", "ADMIN"),
   createAdmission,
 );
 
@@ -31,6 +33,7 @@ router.post(
  */
 router.post(
   "/from-emergency/:emergencyCaseId",
+  authorizeRoles("DOCTOR", "NURSE", "ADMIN"),
   createEmergencyAdmission,
 );
 
@@ -48,6 +51,7 @@ router.get(
  */
 router.post(
   "/:admissionId/discharge",
+  authorizeRoles("DOCTOR", "ADMIN"),
   dischargeAdmission,
 );
 

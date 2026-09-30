@@ -831,7 +831,9 @@ async function dispenseMedication(
       order.order_status ===
         "DISCONTINUED" ||
       order.order_status ===
-        "COMPLETED"
+        "COMPLETED" ||
+      order.order_status ===
+        "DISPENSED"
     ) {
       throw new Error(
         `Medication order cannot be dispensed while it is ${order.order_status}.`,
@@ -842,6 +844,9 @@ async function dispenseMedication(
     /* --------------------------------------------------------
        DISPENSED QUANTITY CHECK
        -------------------------------------------------------- */
+
+    let newTotalDispensed = dispensedQuantity;
+    let prescribedQuantity = null;
 
     if (
       order.quantity_prescribed !==
@@ -884,6 +889,9 @@ async function dispenseMedication(
       const newTotal =
         totalDispensed +
         dispensedQuantity;
+
+      newTotalDispensed = newTotal;
+      prescribedQuantity = prescribed;
 
 
       if (
@@ -960,6 +968,27 @@ async function dispenseMedication(
           pharmacyNotes,
         ],
       );
+
+    const nextStatus =
+      prescribedQuantity !== null &&
+      newTotalDispensed >= prescribedQuantity
+        ? "DISPENSED"
+        : "PARTIALLY_DISPENSED";
+
+    await client.query(
+      `UPDATE public.medication_orders
+       SET order_status = $3, updated_at = CURRENT_TIMESTAMP
+       WHERE medication_order_id = $1 AND hospital_id = $2;`,
+      [orderId, hospitalId, nextStatus],
+    );
+
+    await client.query(
+      `INSERT INTO public.audit_logs (
+         hospital_id, user_id, action_type, entity_type, entity_id, new_values
+       ) VALUES ($1, $2, 'MEDICATION_DISPENSED', 'medication_dispensation', $3, $4::jsonb);`,
+      [hospitalId, dispensedByUserId, result.rows[0].medication_dispensation_id,
+        JSON.stringify({ medicationOrderId: orderId, dispensedQuantity, quantityUnit, orderStatus: nextStatus })],
+    );
 
 
     await client.query(
