@@ -285,6 +285,7 @@ function uploadRadiologyImages(
 
 module.exports = {
   MAX_IMAGE_SIZE_BYTES,
+  detectMimeType,
   uploadRadiologyImages,
   removeUploadedFiles,
   getStoragePath,

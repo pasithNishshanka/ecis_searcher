@@ -3,6 +3,8 @@ const express = require("express");
 const router = express.Router();
 
 const { searchECISCandidates } = require("../controllers/ecis.controller");
+const { searchByStoredImage } = require("../controllers/ecisImageSearch.controller");
+const { uploadECISSearchImage } = require("../middleware/ecisImageSearch.middleware");
 
 const {
   getCandidateEvidence,
@@ -32,6 +34,14 @@ router.post(
   authorizeRoles("DOCTOR"),
   validateECISSearch,
   searchECISCandidates,
+);
+
+router.post(
+  "/image-search",
+  authenticate,
+  authorizeRoles("DOCTOR"),
+  uploadECISSearchImage,
+  searchByStoredImage,
 );
 
 /*
