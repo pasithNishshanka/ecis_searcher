@@ -65,59 +65,6 @@
       </div>
     </div>
 
-    <section class="mb-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h2 class="section-title text-base">Search by radiology image</h2>
-          <p class="mt-1 max-w-2xl text-sm text-slate-500">
-            Upload a file already attached to a radiology order in this hospital. ECIS looks for an exact file match and shows its existing verified report; it does not interpret a new scan.
-          </p>
-        </div>
-        <label
-          class="inline-flex shrink-0 cursor-pointer items-center justify-center rounded-xl bg-teal-700 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-800"
-          :class="imageSearchLoading ? 'pointer-events-none opacity-60' : ''"
-        >
-          <Upload :size="16" class="mr-2" />
-          {{ imageSearchLoading ? 'Searching...' : 'Choose image' }}
-          <input
-            class="sr-only"
-            type="file"
-            accept="image/jpeg,image/png,image/webp,application/dicom,.dcm"
-            :disabled="imageSearchLoading"
-            @change="searchByImage"
-          />
-        </label>
-      </div>
-
-      <p v-if="imageSearchError" class="mt-4 rounded-xl bg-red-50 p-3 text-sm text-red-700">
-        {{ imageSearchError }}
-      </p>
-      <p v-else-if="imageSearched && !imageMatches.length" class="mt-4 rounded-xl bg-slate-50 p-3 text-sm text-slate-600">
-        No identical image is stored in this hospital. First attach the file to a patient's imaging order in <RouterLink to="/radiology" class="font-semibold text-teal-700 underline">Radiology / Imaging</RouterLink>.
-      </p>
-
-      <div v-if="imageMatches.length" class="mt-4 space-y-3">
-        <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">
-          Exact stored-file matches · identity still requires staff review
-        </p>
-        <article v-for="match in imageMatches" :key="match.imageId" class="rounded-xl border border-teal-200 bg-teal-50/50 p-4">
-          <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <h3 class="font-bold text-slate-900">{{ match.patientName }} · {{ match.patientNumber }}</h3>
-              <p class="mt-1 text-sm text-slate-600">{{ match.investigationName }} · {{ match.investigationStatus }}</p>
-              <p class="mt-3 text-sm text-slate-700">
-                {{ match.verifiedReportSummary || 'No verified radiology report is recorded for this image.' }}
-              </p>
-            </div>
-            <RouterLink :to="`/patients/${match.patientId}`" class="shrink-0">
-              <BaseButton variant="secondary" size="sm">Review patient EHR</BaseButton>
-            </RouterLink>
-          </div>
-        </article>
-      </div>
-    </section>
-
-
     <div
       class="grid gap-6 xl:grid-cols-[320px_1fr]"
     >
@@ -968,7 +915,6 @@ import {
 import {
   ArrowRight,
   Search,
-  Upload,
 } from "lucide-vue-next";
 
 
@@ -1000,7 +946,6 @@ import RangeField
 import {
   apiGet,
   apiPost,
-  apiUpload,
 } from "../services/api";
 
 
@@ -1100,17 +1045,6 @@ interface BackendCandidate {
 
   fullModelCoveragePercent?: number;
 }
-
-interface ImageMatch {
-  imageId: number;
-  patientId: number;
-  patientNumber: string;
-  patientName: string;
-  investigationName: string;
-  investigationStatus: string;
-  verifiedReportSummary: string | null;
-}
-
 
 interface DentalRecord {
   dental_record_id: number;
@@ -1327,44 +1261,6 @@ const results =
   ref<
     BackendCandidate[]
   >([]);
-
-const imageMatches = ref<ImageMatch[]>([]);
-const imageSearchLoading = ref(false);
-const imageSearchError = ref("");
-const imageSearched = ref(false);
-
-async function searchByImage(event: Event) {
-  const input = event.target as HTMLInputElement;
-  const file = input.files?.[0];
-  input.value = "";
-  if (!file) return;
-
-  imageSearchError.value = "";
-  imageSearched.value = false;
-  imageMatches.value = [];
-
-  const isDicom = /\.dcm$/i.test(file.name) &&
-    ["", "application/octet-stream", "application/dicom"].includes(file.type);
-  if (file.size === 0 || file.size > 20 * 1024 * 1024 ||
-      (!["image/jpeg", "image/png", "image/webp", "application/dicom"].includes(file.type) && !isDicom)) {
-    imageSearchError.value = "Choose a JPEG, PNG, WebP, or DICOM file no larger than 20 MB.";
-    return;
-  }
-
-  imageSearchLoading.value = true;
-  try {
-    const formData = new FormData();
-    formData.append("image", file);
-    const response = await apiUpload<{ matches: ImageMatch[] }>("/ecis/image-search", formData);
-    imageMatches.value = response.matches || [];
-    imageSearched.value = true;
-  } catch (cause) {
-    imageSearchError.value = cause instanceof Error ? cause.message : "Image search failed.";
-  } finally {
-    imageSearchLoading.value = false;
-  }
-}
-
 
 const loading =
   ref(false);
@@ -2299,10 +2195,6 @@ function clear() {
 
   results.value =
     [];
-
-  imageMatches.value = [];
-  imageSearchError.value = "";
-  imageSearched.value = false;
 
   error.value =
     "";
