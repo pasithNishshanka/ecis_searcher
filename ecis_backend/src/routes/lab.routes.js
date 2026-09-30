@@ -15,9 +15,11 @@ const {
 
 const router =
   express.Router();
+const { authorizeRoles } = require("../middleware/authorization.middleware");
 
 router.post(
   "/orders",
+  authorizeRoles("DOCTOR", "NURSE"),
   createLabOrder,
 );
 
@@ -38,11 +40,13 @@ router.get(
 
 router.put(
   "/orders/:investigationId/result",
+  authorizeRoles("LAB_TECHNICIAN"),
   recordLabResult,
 );
 
 router.post(
   "/orders/:investigationId/verify",
+  authorizeRoles("LAB_TECHNICIAN"),
   verifyLabResult,
 );
 

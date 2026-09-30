@@ -3,6 +3,7 @@ const express = require("express");
 const {
   authenticate,
 } = require("../middleware/auth.middleware");
+const { authorizeRoles } = require("../middleware/authorization.middleware");
 
 const {
   createTreatment,
@@ -15,7 +16,7 @@ const router = express.Router();
 
 router.use(authenticate);
 
-router.post("/", createTreatment);
+router.post("/", authorizeRoles("DOCTOR", "NURSE"), createTreatment);
 
 // Get all treatment records
 router.get("/", getAllTreatments);

@@ -246,17 +246,28 @@ async function createClinicVisit(
     const hospitalId =
       getHospitalId(req);
 
-    const doctorUserId =
+    const actorUserId =
       getUserId(req);
+
+    const doctorUserId = String(req.user?.role || "").toUpperCase() === "DOCTOR"
+      ? actorUserId
+      : parsePositiveInteger(req.body?.doctorUserId);
 
     if (
       !hospitalId ||
-      !doctorUserId
+      !actorUserId
     ) {
       return res.status(401).json({
         success: false,
         message:
           "Authenticated hospital/user information is missing.",
+      });
+    }
+
+    if (!doctorUserId) {
+      return res.status(400).json({
+        success: false,
+        message: "Select an active doctor for this hospital.",
       });
     }
 
@@ -297,6 +308,7 @@ async function createClinicVisit(
         hospitalId,
 
         doctorUserId,
+        actorUserId,
       });
 
     return res.status(201).json({

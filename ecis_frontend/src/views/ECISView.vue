@@ -807,6 +807,7 @@
         </div>
 
         <div v-if="emergencyCaseId && !identityConfirmed" class="mt-5 border-t pt-4">
+          <template v-if="!hasConfirmedReview">
           <FormField label="Human review reason" required>
             <BaseInput v-model="reviewReason" placeholder="State the evidence you verified" />
           </FormField>
@@ -815,6 +816,7 @@
             <BaseButton variant="secondary" :disabled="reviewSaving || !reviewReason.trim()" @click="recordReview('NEEDS_MORE_EVIDENCE')">Need more evidence</BaseButton>
             <BaseButton variant="secondary" :disabled="reviewSaving || !reviewReason.trim()" @click="recordReview('REJECTED')">Reject candidate</BaseButton>
           </div>
+          </template>
           <BaseButton v-if="hasConfirmedReview" class="mt-4" :disabled="reviewSaving" @click="confirmIdentity">
             Confirm identity and link patient
           </BaseButton>

@@ -48,8 +48,12 @@ async function createOpdVisit(
     const hospitalId =
       getHospitalId(req);
 
-    const doctorUserId =
+    const actorUserId =
       getUserId(req);
+
+    const doctorUserId = String(req.user?.role || "").toUpperCase() === "DOCTOR"
+      ? actorUserId
+      : parsePositiveInteger(req.body?.doctorUserId);
 
     if (!hospitalId) {
       return res.status(401).json({
@@ -59,11 +63,18 @@ async function createOpdVisit(
       });
     }
 
-    if (!doctorUserId) {
+    if (!actorUserId) {
       return res.status(401).json({
         success: false,
         message:
           "Authenticated user information is missing.",
+      });
+    }
+
+    if (!doctorUserId) {
+      return res.status(400).json({
+        success: false,
+        message: "Select an active doctor for this hospital.",
       });
     }
 
@@ -88,11 +99,8 @@ async function createOpdVisit(
 
         hospitalId,
 
-        /*
-         * Never trust doctorUserId from frontend.
-         * The authenticated user is authoritative.
-         */
         doctorUserId,
+        actorUserId,
       });
 
     return res.status(201).json({

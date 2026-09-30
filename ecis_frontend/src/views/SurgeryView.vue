@@ -600,6 +600,18 @@
           </p>
         </div>
 
+        <FormField v-if="requiresDoctorSelection" label="Clinical provider" required>
+          <BaseSelect v-model="selectedDoctorId" required :disabled="saving">
+            <option value="">Select a doctor or surgeon</option>
+            <option v-for="doctor in doctorOptions" :key="doctor.userId" :value="String(doctor.userId)">
+              {{ doctor.fullName }}
+            </option>
+          </BaseSelect>
+          <p v-if="!doctorOptions.length" class="muted mt-1">
+            No doctor or surgeon is assigned to this hospital. Add one in Settings.
+          </p>
+        </FormField>
+
         <FormField
           :label="
             recordType === 'SURGERY'
@@ -727,7 +739,7 @@
             </FormField>
           </div>
 
-          <div
+          <div v-if="!requiresDoctorSelection"
             class="sm:col-span-2 rounded-xl bg-slate-50 p-3 text-xs text-slate-500"
           >
             The authenticated doctor is recorded automatically as the
@@ -765,7 +777,8 @@
             type="submit"
             :disabled="
               saving ||
-              !selectedEncounterId
+              !selectedEncounterId ||
+              (requiresDoctorSelection && !selectedDoctorId)
             "
           >
             {{
@@ -906,6 +919,29 @@ const contextError =
 
 const modalOpen =
   ref(false);
+
+type DoctorOption = { userId: number; fullName: string };
+const doctorOptions = ref<DoctorOption[]>([]);
+const selectedDoctorId = ref("");
+const requiresDoctorSelection = (() => {
+  try {
+    return !["DOCTOR", "SURGEON"].includes(
+      String(JSON.parse(localStorage.getItem("ecis-user") || "{}").role || "").toUpperCase(),
+    );
+  } catch {
+    return true;
+  }
+})();
+
+async function loadDoctors() {
+  try {
+  const response = await apiGet<{ data?: DoctorOption[] }>("/providers?role=DOCTOR,SURGEON");
+    doctorOptions.value = response.data || [];
+  } catch (cause) {
+    doctorOptions.value = [];
+    saveError.value = cause instanceof Error ? cause.message : "Unable to load doctors.";
+  }
+}
 
 const saving =
   ref(false);
@@ -1300,6 +1336,9 @@ function openRecord(
 
   resetForm();
 
+  selectedDoctorId.value = "";
+  if (requiresDoctorSelection) void loadDoctors();
+
   modalOpen.value =
     true;
 }
@@ -1324,6 +1363,11 @@ async function saveRecord() {
   if (!selectedEncounterId.value) {
     saveError.value =
       "Select the clinical encounter for this record.";
+    return;
+  }
+
+  if (requiresDoctorSelection && !selectedDoctorId.value) {
+    saveError.value = "Select the clinical provider for this record.";
     return;
   }
 
@@ -1376,6 +1420,7 @@ async function saveRecord() {
           patientId,
           encounterId:
             selectedEncounterId.value,
+          surgeonUserId: requiresDoctorSelection ? Number(selectedDoctorId.value) : undefined,
           surgeryCode:
             form.code.trim() ||
             null,
@@ -1413,6 +1458,7 @@ async function saveRecord() {
           patientId,
           encounterId:
             selectedEncounterId.value,
+          performedBy: requiresDoctorSelection ? Number(selectedDoctorId.value) : undefined,
           procedureCode:
             form.code.trim() ||
             null,

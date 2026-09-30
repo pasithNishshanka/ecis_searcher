@@ -115,6 +115,8 @@ async function createOpdVisit(opdData) {
       opdData.doctorUserId,
     );
 
+  const actorUserId = validateUserId(opdData.actorUserId);
+
   const department =
     cleanString(
       opdData.department,
@@ -229,17 +231,23 @@ async function createOpdVisit(opdData) {
       await client.query(
         `
           SELECT
-            user_id,
-            hospital_id,
-            full_name,
-            role,
-            is_active
-          FROM public.hospital_users
+            u.user_id,
+            a.hospital_id,
+            u.full_name,
+            a.role,
+            u.is_active
+          FROM public.hospital_users u
+          INNER JOIN public.hospital_user_assignments a
+            ON a.user_id = u.user_id
           WHERE
-            user_id = $1
-            AND hospital_id = $2
-            AND is_active = TRUE
-          FOR SHARE;
+            u.user_id = $1
+            AND a.hospital_id = $2
+            AND a.role = 'DOCTOR'
+            AND a.status = 'ACTIVE'
+            AND a.start_date <= CURRENT_DATE
+            AND (a.end_date IS NULL OR a.end_date >= CURRENT_DATE)
+            AND u.is_active = TRUE
+          FOR SHARE OF u, a;
         `,
         [
           doctorUserId,
@@ -351,6 +359,19 @@ async function createOpdVisit(opdData) {
           followUpDate,
         ],
       );
+
+    await client.query(
+      `INSERT INTO public.audit_logs (
+         hospital_id, user_id, action_type, entity_type, entity_id,
+         new_values
+       ) VALUES ($1, $2, 'OPD_VISIT_CREATED', 'opd_visit', $3, $4::jsonb);`,
+      [
+        hospitalId,
+        actorUserId,
+        opdResult.rows[0].opd_visit_id,
+        JSON.stringify({ patientId, encounterId, doctorUserId }),
+      ],
+    );
 
     await client.query(
       "COMMIT",

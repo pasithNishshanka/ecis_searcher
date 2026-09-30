@@ -38,7 +38,10 @@ async function createSurgery(
           hospitalId:
             req.user?.hospitalId,
           surgeonUserId:
-            req.user?.userId,
+            ["DOCTOR", "SURGEON"].includes(String(req.user?.role || "").toUpperCase())
+              ? req.user?.userId
+              : req.body?.surgeonUserId,
+          actorUserId: req.user?.userId,
         },
       );
 
@@ -67,6 +70,12 @@ async function createSurgery(
       ) ||
       error.message.includes(
         "incomplete",
+      ) ||
+      error.message.includes(
+        "active doctor",
+      ) ||
+      error.message.includes(
+        "clinical user was not found",
       )
     ) {
       return res.status(400).json({

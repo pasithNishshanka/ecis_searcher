@@ -49,6 +49,11 @@ async function assertPatientAccess(client, patientId, hospitalId, emergencyCaseI
               AND ec.hospital_id = $2
               AND ec.unidentified_patient = TRUE
               AND ec.status <> 'DISCHARGED'
+              AND EXISTS (
+                SELECT 1 FROM public.ecis_search_logs l
+                WHERE l.emergency_case_id = ec.emergency_case_id
+                  AND p.patient_id = ANY(l.candidate_patient_ids)
+              )
           )
         )
       LIMIT 1;
@@ -63,17 +68,17 @@ async function assertPatientAccess(client, patientId, hospitalId, emergencyCaseI
   return result.rows[0];
 }
 
-async function getCandidateEvidence(patientIdValue, hospitalIdValue, emergencyCaseIdValue = null) {
+async function getCandidateEvidence(patientIdValue, hospitalIdValue, emergencyCaseIdValue, accessedByValue) {
   const patientId = positiveInteger(patientIdValue, "patientId");
   const hospitalId = positiveInteger(hospitalIdValue, "hospitalId");
   const emergencyCaseId = emergencyCaseIdValue == null
     ? null
     : positiveInteger(emergencyCaseIdValue, "emergencyCaseId");
+  const accessedBy = positiveInteger(accessedByValue, "accessedBy");
 
-  const client = await pool.connect();
+  const client = pool;
 
-  try {
-    const patient = await assertPatientAccess(
+  const patient = await assertPatientAccess(
       client,
       patientId,
       hospitalId,
@@ -450,6 +455,14 @@ async function getCandidateEvidence(patientIdValue, hospitalIdValue, emergencyCa
       ),
     ]);
 
+    await pool.query(
+      `INSERT INTO public.audit_logs (
+         hospital_id, user_id, action_type, entity_type, entity_id,
+         new_values
+       ) VALUES ($1, $2, 'ECIS_EVIDENCE_ACCESSED', 'patient', $3, $4::jsonb);`,
+      [hospitalId, accessedBy, patientId, JSON.stringify({ emergencyCaseId })],
+    );
+
     return {
       patient,
 
@@ -481,9 +494,6 @@ async function getCandidateEvidence(patientIdValue, hospitalIdValue, emergencyCa
         bht: bhtResult.rowCount,
       },
     };
-  } finally {
-    client.release();
-  }
 }
 
 module.exports = {

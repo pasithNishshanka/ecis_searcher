@@ -107,6 +107,10 @@ async function confirmIdentity(
       error?.message ||
       "Unable to confirm emergency identity";
 
+    if (message.includes("encounter does not match")) {
+      return res.status(409).json({ success: false, message });
+    }
+
     if (
       message.includes(
         "required",
@@ -133,7 +137,8 @@ async function confirmIdentity(
       ) ||
       message.includes(
         "already linked",
-      )
+      ) ||
+      message.includes("already been confirmed")
     ) {
       return res.status(403).json({
         success: false,

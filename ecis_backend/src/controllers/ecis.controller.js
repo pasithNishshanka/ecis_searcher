@@ -468,9 +468,10 @@ const searchECISCandidates = async (
           emergency_case_id,
           searched_by,
           search_criteria,
-          result_count
+          result_count,
+          candidate_patient_ids
         )
-        VALUES ($1, $2, $3, $4);
+        VALUES ($1, $2, $3, $4, $5::BIGINT[]);
       `,
       [
         emergencyCaseId,
@@ -479,6 +480,7 @@ const searchECISCandidates = async (
           serviceCriteria,
         ),
         candidates.length,
+        candidates.map((candidate) => candidate.patientId),
       ],
     );
 

@@ -39,7 +39,10 @@ async function createProcedure(
             req.user?.hospitalId,
 
           performedBy:
-            req.user?.userId,
+            ["DOCTOR", "SURGEON"].includes(String(req.user?.role || "").toUpperCase())
+              ? req.user?.userId
+              : req.body?.performedBy,
+          actorUserId: req.user?.userId,
         },
       );
 
@@ -60,12 +63,15 @@ async function createProcedure(
       });
     }
 
-    if (
-      error.message.includes(
-        "does not belong",
-      )
-    ) {
-      return res.status(403).json({
+    if (error.message === "Patient is not registered at this hospital") {
+      return res.status(404).json({
+        success: false,
+        message: error.message,
+      });
+    }
+
+    if (/must be|required|invalid|Encounter does not belong|Select an active doctor/.test(error.message)) {
+      return res.status(400).json({
         success: false,
         message: error.message,
       });
@@ -88,6 +94,7 @@ async function getPatientProcedures(
     const procedures =
       await procedureService.getPatientProcedures(
         patientId,
+        req.user?.hospitalId,
       );
 
     return res.status(200).json({

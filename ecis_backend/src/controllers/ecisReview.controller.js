@@ -107,7 +107,8 @@ async function createCandidateReview(
     if (
       message.includes("required") ||
       message.includes("positive integer") ||
-      message.includes("Invalid review")
+      message.includes("Invalid review") ||
+      message.includes("Search the EHR")
     ) {
       return res.status(400).json({
         success: false,

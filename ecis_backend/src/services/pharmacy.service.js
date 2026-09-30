@@ -124,9 +124,12 @@ async function createMedicationOrder(
 
   const prescribedByUserId =
     toPositiveInteger(
-      authUser?.userId,
-      "Authenticated user",
+      String(authUser?.role || "").toUpperCase() === "DOCTOR"
+        ? authUser?.userId
+        : medicationData.prescribedByUserId,
+      "prescribedByUserId",
     );
+  const actorUserId = toPositiveInteger(authUser?.userId, "Authenticated user");
 
   const medicationName =
     String(
@@ -239,19 +242,23 @@ async function createMedicationOrder(
       await client.query(
         `
         SELECT
-          patient_id,
-          patient_number,
-          first_name,
-          middle_name,
-          last_name,
-          date_of_birth,
-          hospital_id,
-          status
-        FROM public.patients
+          p.patient_id,
+          p.patient_number,
+          p.first_name,
+          p.middle_name,
+          p.last_name,
+          p.date_of_birth,
+          p.status
+        FROM public.patients p
         WHERE
-          patient_id = $1
-          AND hospital_id = $2
-        FOR SHARE;
+          p.patient_id = $1
+          AND EXISTS (
+            SELECT 1 FROM public.patient_hospital_registrations phr
+            WHERE phr.patient_id = p.patient_id
+              AND phr.hospital_id = $2
+              AND phr.status = 'ACTIVE'
+          )
+        FOR SHARE OF p;
         `,
         [
           patientId,
@@ -360,6 +367,20 @@ async function createMedicationOrder(
       throw new Error(
         "Encounter does not belong to the selected patient and hospital.",
       );
+    }
+
+    const prescriber = await client.query(
+      `SELECT u.user_id FROM public.hospital_users u
+         JOIN public.hospital_user_assignments a ON a.user_id = u.user_id
+        WHERE u.user_id = $1 AND u.is_active = TRUE
+          AND a.hospital_id = $2 AND a.role = 'DOCTOR'
+          AND a.status = 'ACTIVE' AND a.start_date <= CURRENT_DATE
+          AND (a.end_date IS NULL OR a.end_date >= CURRENT_DATE)
+        LIMIT 1 FOR SHARE OF u, a;`,
+      [prescribedByUserId, hospitalId],
+    );
+    if (!prescriber.rowCount) {
+      throw new Error("Select an active doctor for this hospital.");
     }
 
 
@@ -534,6 +555,14 @@ async function createMedicationOrder(
           prescribedNotes,
         ],
       );
+
+    await client.query(
+      `INSERT INTO public.audit_logs (
+         hospital_id, user_id, action_type, entity_type, entity_id, new_values
+       ) VALUES ($1, $2, 'MEDICATION_ORDER_CREATED', 'medication_order', $3, $4::jsonb);`,
+      [hospitalId, actorUserId, result.rows[0].medication_order_id,
+        JSON.stringify({ patientId, encounterId, prescribedByUserId })],
+    );
 
 
     await client.query(

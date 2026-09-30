@@ -13,6 +13,7 @@ const ASSIGNABLE_ROLES = new Set([
   "PHARMACIST",
   "RECEPTIONIST",
   "ECIS_SEARCHER",
+  "SYSTEM_ADMIN",
 ]);
 
 function optionalText(value, fieldName, maxLength) {
@@ -242,6 +243,9 @@ async function createStaffAccount({ actor, input }) {
 
   const hospitalId = positiveInteger(input.hospitalId, "hospitalId");
   const role = normalizedRole(input.role);
+  if (role === "SYSTEM_ADMIN") {
+    throw new Error("System administrator accounts must be provisioned separately.");
+  }
   const employeeNumber = requiredText(input.employeeNumber, "employeeNumber", 100);
   const fullName = requiredText(input.fullName, "fullName", 200);
   const username = requiredText(input.username, "username", 100).toLowerCase();
@@ -385,6 +389,10 @@ async function createOrUpdateAssignment({ actor, input }) {
   const userId = positiveInteger(input.userId, "userId");
   const hospitalId = positiveInteger(input.hospitalId, "hospitalId");
   const role = normalizedRole(input.role);
+  if (role === "SYSTEM_ADMIN" &&
+      (!isSystemAdministrator(actorRole) || userId !== Number(actor?.userId))) {
+    throw new Error("Only the current system administrator may add their own system administrator hospital assignment.");
+  }
   const startDate = optionalDate(input.startDate, "startDate") || new Date().toISOString().slice(0, 10);
   const endDate = optionalDate(input.endDate, "endDate");
 
@@ -493,9 +501,15 @@ async function createOrUpdateAssignment({ actor, input }) {
         [userId, hospitalId, role, department, designation, licenseNumber, startDate, endDate],
       );
 
-    await client.query("COMMIT");
-
     const assignment = assignmentResult.rows[0];
+    await client.query(
+      `INSERT INTO public.audit_logs (
+         hospital_id, user_id, action_type, entity_type, entity_id,
+         new_values
+       ) VALUES ($1, $2, 'HOSPITAL_ASSIGNMENT_SAVED', 'hospital_user_assignment', $3, $4::jsonb);`,
+      [hospitalId, actor.userId, assignment.assignment_id, JSON.stringify(assignment)],
+    );
+    await client.query("COMMIT");
     return {
       assignmentId: Number(assignment.assignment_id),
       userId: Number(assignment.user_id),

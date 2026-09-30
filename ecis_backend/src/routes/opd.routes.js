@@ -1,4 +1,5 @@
 const express = require("express");
+const { authorizeRoles } = require("../middleware/authorization.middleware");
 
 const {
   createOpdVisit,
@@ -22,6 +23,7 @@ const router =
  */
 router.post(
   "/visits",
+  authorizeRoles("DOCTOR"),
   createOpdVisit,
 );
 

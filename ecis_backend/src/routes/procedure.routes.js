@@ -14,7 +14,7 @@ const router =
 
 router.post(
   "/",
-  authorizeRoles("DOCTOR"),
+  authorizeRoles("DOCTOR", "SURGEON"),
   createProcedure,
 );
 

@@ -140,6 +140,17 @@ async function reviewCandidate({
       );
     }
 
+    const searchResult = await client.query(
+      `SELECT 1 FROM public.ecis_search_logs
+       WHERE emergency_case_id = $1
+         AND $2::BIGINT = ANY(candidate_patient_ids)
+       LIMIT 1;`,
+      [emergencyCaseId, patientId],
+    );
+    if (searchResult.rowCount === 0) {
+      throw new Error("Search the EHR for this emergency case and select a returned candidate before review");
+    }
+
     /*
      * --------------------------------------------------------
      * 2. Validate patient candidate
@@ -194,26 +205,23 @@ async function reviewCandidate({
       await client.query(
         `
           SELECT
-            user_id,
-            hospital_id,
-            full_name,
-            username,
-            role,
-            is_active
-          FROM public.hospital_users
+            u.user_id,
+            a.hospital_id,
+            u.full_name,
+            u.username,
+            a.role,
+            u.is_active
+          FROM public.hospital_users u
+          INNER JOIN public.hospital_user_assignments a
+            ON a.user_id = u.user_id
           WHERE
-            user_id = $1
-            AND EXISTS (
-              SELECT 1
-              FROM public.hospital_user_assignments a
-              WHERE a.user_id = hospital_users.user_id
-                AND a.hospital_id = $2
-                AND a.status = 'ACTIVE'
-                AND a.start_date <= CURRENT_DATE
-                AND (a.end_date IS NULL OR a.end_date >= CURRENT_DATE)
-            )
+            u.user_id = $1
+            AND a.hospital_id = $2
+            AND a.status = 'ACTIVE'
+            AND a.start_date <= CURRENT_DATE
+            AND (a.end_date IS NULL OR a.end_date >= CURRENT_DATE)
           LIMIT 1
-          FOR SHARE;
+          FOR SHARE OF u, a;
         `,
         [
           reviewedBy,
@@ -265,17 +273,13 @@ async function reviewCandidate({
           FROM public.ecis_candidate_reviews
           WHERE
             emergency_case_id = $1
-            AND patient_id = $2
             AND review_status = 'CONFIRMED'
           ORDER BY
             reviewed_at DESC,
             review_id DESC
           LIMIT 1;
         `,
-        [
-          emergencyCaseId,
-          patientId,
-        ],
+        [emergencyCaseId],
       );
 
     if (
@@ -283,7 +287,7 @@ async function reviewCandidate({
       0
     ) {
       throw new Error(
-        "This candidate has already been confirmed for the emergency case",
+        "A candidate has already been confirmed for the emergency case",
       );
     }
 

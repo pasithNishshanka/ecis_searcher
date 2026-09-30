@@ -26,6 +26,9 @@ async function createMedicationOrder(
         medicationOrder,
     });
   } catch (error) {
+    if (/prescribedByUserId|Select an active doctor|Patient not found|Encounter does not belong|is required|is invalid/.test(error.message)) {
+      return res.status(400).json({ success: false, message: error.message });
+    }
     next(error);
   }
 }

@@ -752,11 +752,15 @@
         </div>
 
 
-        <div
-          class="sm:col-span-2 rounded-xl bg-slate-50 p-3 text-xs leading-5 text-slate-500"
-        >
-          The backend records the authenticated doctor as the consulting clinician. Doctor identity is not taken from the browser form.
-        </div>
+        <FormField v-if="requiresDoctorSelection" label="Consulting doctor" required>
+          <BaseSelect v-model="selectedDoctorId" required :disabled="saving">
+            <option value="">Select an assigned doctor</option>
+            <option v-for="doctor in doctorOptions" :key="doctor.userId" :value="String(doctor.userId)">
+              {{ doctor.fullName }}{{ doctor.designation ? ` · ${doctor.designation}` : "" }}
+            </option>
+          </BaseSelect>
+          <p v-if="!doctorOptions.length" class="muted mt-1">No doctor is assigned to this hospital. Add one in Settings.</p>
+        </FormField>
 
 
         <div
@@ -831,6 +835,8 @@ import BaseButton
 
 import BaseInput
   from "../components/ui/BaseInput.vue";
+
+import BaseSelect from "../components/ui/BaseSelect.vue";
 
 import BaseTextarea
   from "../components/ui/BaseTextarea.vue";
@@ -952,6 +958,27 @@ const error =
 const open =
   ref(false);
 
+type DoctorOption = { userId: number; fullName: string; designation: string | null };
+const doctorOptions = ref<DoctorOption[]>([]);
+const selectedDoctorId = ref("");
+const requiresDoctorSelection = (() => {
+  try {
+    return String(JSON.parse(localStorage.getItem("ecis-user") || "{}").role || "").toUpperCase() !== "DOCTOR";
+  } catch {
+    return true;
+  }
+})();
+
+async function loadDoctors() {
+  try {
+    const response = await apiGet<{ data?: DoctorOption[] }>("/providers?role=DOCTOR");
+    doctorOptions.value = response.data || [];
+  } catch (cause) {
+    doctorOptions.value = [];
+    error.value = cause instanceof Error ? cause.message : "Unable to load doctors.";
+  }
+}
+
 
 const form =
   reactive({
@@ -983,6 +1010,8 @@ const canSubmit =
 
       !!selectedClinic.value
         ?.clinic_id &&
+
+      (!requiresDoctorSelection || !!selectedDoctorId.value) &&
 
       form.reasonForVisit
         .trim()
@@ -1184,6 +1213,8 @@ function openVisitForm() {
 
   open.value =
     true;
+
+  if (requiresDoctorSelection) void loadDoctors();
 }
 
 
@@ -1267,6 +1298,8 @@ async function saveVisit() {
             selectedPatient.value
               .id,
           ),
+
+        doctorUserId: requiresDoctorSelection ? Number(selectedDoctorId.value) : undefined,
 
         visitDate:
           form.visitDate,

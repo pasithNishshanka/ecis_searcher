@@ -114,6 +114,7 @@
               Staff role
               <select v-model="staffAccountForm.role" class="field mt-1">
                 <option v-for="role in assignmentRoles" :key="role" :value="role">{{ role.replaceAll("_", " ") }}</option>
+                <option v-if="canCreateHospitals && selectedStaff?.userId === context?.userId" value="SYSTEM_ADMIN">System administrator</option>
               </select>
             </label>
             <label class="label">

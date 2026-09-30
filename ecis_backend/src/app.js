@@ -12,6 +12,9 @@ const cors =
 const patientRoutes =
   require("./routes/patient.routes");
 
+const providerRoutes =
+  require("./routes/provider.routes");
+
 const opdRoutes =
   require("./routes/opd.routes");
 
@@ -223,6 +226,8 @@ app.use(
   "/api/patients",
   patientRoutes,
 );
+
+app.use("/api/providers", providerRoutes);
 
 
 /* ============================================================

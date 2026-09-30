@@ -24,11 +24,16 @@ async function assertPatientAccess(client, patientId, hospitalId) {
   const result = await client.query(
     `
       SELECT patient_id
-      FROM public.patients
+      FROM public.patients p
       WHERE
-        patient_id = $1
-        AND hospital_id = $2
-        AND status = 'ACTIVE'
+        p.patient_id = $1
+        AND p.status = 'ACTIVE'
+        AND EXISTS (
+          SELECT 1 FROM public.patient_hospital_registrations phr
+          WHERE phr.patient_id = p.patient_id
+            AND phr.hospital_id = $2
+            AND phr.status = 'ACTIVE'
+        )
       FOR SHARE;
     `,
     [patientId, hospitalId],
@@ -43,11 +48,18 @@ async function assertClinicianAccess(client, userId, hospitalId) {
   const result = await client.query(
     `
       SELECT user_id
-      FROM public.hospital_users
+      FROM public.hospital_users u
       WHERE
-        user_id = $1
-        AND hospital_id = $2
-        AND is_active = TRUE
+        u.user_id = $1
+        AND u.is_active = TRUE
+        AND EXISTS (
+          SELECT 1 FROM public.hospital_user_assignments a
+          WHERE a.user_id = u.user_id
+            AND a.hospital_id = $2
+            AND a.status = 'ACTIVE'
+            AND a.start_date <= CURRENT_DATE
+            AND (a.end_date IS NULL OR a.end_date >= CURRENT_DATE)
+        )
       FOR SHARE;
     `,
     [userId, hospitalId],
@@ -266,7 +278,9 @@ async function getPatientDentalRecords(patientIdValue, hospitalIdValue) {
       FROM public.dental_records d
       INNER JOIN public.patients p
         ON p.patient_id = d.patient_id
-       AND p.hospital_id = $2
+      INNER JOIN public.encounters e
+        ON e.encounter_id = d.encounter_id
+       AND e.hospital_id = $2
       LEFT JOIN public.hospital_users u
         ON u.user_id = d.recorded_by
       WHERE d.patient_id = $1
@@ -296,7 +310,9 @@ async function getDentalRecordById(dentalRecordIdValue, hospitalIdValue) {
       FROM public.dental_records d
       INNER JOIN public.patients p
         ON p.patient_id = d.patient_id
-       AND p.hospital_id = $2
+      INNER JOIN public.encounters e
+        ON e.encounter_id = d.encounter_id
+       AND e.hospital_id = $2
       LEFT JOIN public.hospital_users u
         ON u.user_id = d.recorded_by
       WHERE d.dental_record_id = $1;

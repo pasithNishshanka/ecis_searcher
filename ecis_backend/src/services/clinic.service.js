@@ -1,5 +1,4 @@
 const pool = require("../config/database");
-const { hasLocalSystemAdminAccess } = require("../config/localAccess");
 
 function cleanString(value) {
   if (value === undefined || value === null) {
@@ -296,6 +295,8 @@ async function createClinicVisit(
       "doctorUserId",
     );
 
+  const actorUserId = parsePositiveInteger(visitData.actorUserId, "actorUserId");
+
   const visitDate =
     normalizeDate(
       visitData.visitDate,
@@ -448,17 +449,23 @@ async function createClinicVisit(
       await client.query(
         `
           SELECT
-            user_id,
-            hospital_id,
-            full_name,
-            role,
-            is_active
-          FROM public.hospital_users
+            u.user_id,
+            a.hospital_id,
+            u.full_name,
+            a.role,
+            u.is_active
+          FROM public.hospital_users u
+          INNER JOIN public.hospital_user_assignments a
+            ON a.user_id = u.user_id
           WHERE
-            user_id = $1
-            AND hospital_id = $2
-            AND is_active = TRUE
-          FOR SHARE;
+            u.user_id = $1
+            AND a.hospital_id = $2
+            AND a.role = 'DOCTOR'
+            AND a.status = 'ACTIVE'
+            AND a.start_date <= CURRENT_DATE
+            AND (a.end_date IS NULL OR a.end_date >= CURRENT_DATE)
+            AND u.is_active = TRUE
+          FOR SHARE OF u, a;
         `,
         [
           doctorUserId,
@@ -477,19 +484,6 @@ async function createClinicVisit(
 
     const doctor =
       doctorResult.rows[0];
-
-    if (
-      doctor.role &&
-      String(
-        doctor.role,
-      ).toUpperCase() !==
-        "DOCTOR" &&
-      !hasLocalSystemAdminAccess(doctor.role)
-    ) {
-      throw new Error(
-        "Only a doctor can complete a clinic consultation.",
-      );
-    }
 
     /*
      * Create the clinical encounter.
@@ -596,6 +590,19 @@ async function createClinicVisit(
           followUpDate,
         ],
       );
+
+    await client.query(
+      `INSERT INTO public.audit_logs (
+         hospital_id, user_id, action_type, entity_type, entity_id,
+         new_values
+       ) VALUES ($1, $2, 'CLINIC_VISIT_CREATED', 'clinic_visit', $3, $4::jsonb);`,
+      [
+        hospitalId,
+        actorUserId,
+        visitResult.rows[0].clinic_visit_id,
+        JSON.stringify({ patientId, encounterId, doctorUserId, clinicId }),
+      ],
+    );
 
     await client.query(
       "COMMIT",

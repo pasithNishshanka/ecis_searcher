@@ -1,5 +1,4 @@
 const pool = require("../config/database");
-const { hasLocalSystemAdminAccess } = require("../config/localAccess");
 
 function nullablePositiveInteger(value, fieldName) {
   if (
@@ -102,14 +101,18 @@ async function validateClinicalContext(
     await client.query(
       `
         SELECT
-          patient_id,
-          hospital_id,
-          status
-        FROM public.patients
+          p.patient_id,
+          p.status
+        FROM public.patients p
         WHERE
-          patient_id = $1
-          AND hospital_id = $2
-        FOR SHARE;
+          p.patient_id = $1
+          AND EXISTS (
+            SELECT 1 FROM public.patient_hospital_registrations phr
+            WHERE phr.patient_id = p.patient_id
+              AND phr.hospital_id = $2
+              AND phr.status = 'ACTIVE'
+          )
+        FOR SHARE OF p;
       `,
       [
         patientId,
@@ -297,15 +300,20 @@ async function validateRecordingUser(
     await client.query(
       `
         SELECT
-          user_id,
-          hospital_id,
-          full_name,
-          role,
-          is_active
-        FROM public.hospital_users
+          u.user_id,
+          u.full_name,
+          a.role,
+          u.is_active
+        FROM public.hospital_users u
+        INNER JOIN public.hospital_user_assignments a
+          ON a.user_id = u.user_id
         WHERE
-          user_id = $1
-          AND hospital_id = $2
+          u.user_id = $1
+          AND a.hospital_id = $2
+          AND a.role IN ('DOCTOR', 'SURGEON')
+          AND a.status = 'ACTIVE'
+          AND a.start_date <= CURRENT_DATE
+          AND (a.end_date IS NULL OR a.end_date >= CURRENT_DATE)
         LIMIT 1;
       `,
       [
@@ -325,20 +333,6 @@ async function validateRecordingUser(
 
   const user =
     result.rows[0];
-
-  if (
-    String(
-      user.role || "",
-    )
-      .trim()
-      .toUpperCase() !==
-      "DOCTOR" &&
-    !hasLocalSystemAdminAccess(user.role)
-  ) {
-    throw new Error(
-      "Only an authenticated doctor can record surgery",
-    );
-  }
 
   return user;
 }
@@ -375,6 +369,10 @@ async function createSurgery(
       surgeryData.surgeonUserId,
       "surgeonUserId",
     );
+  const actorUserId = nullablePositiveInteger(
+    surgeryData.actorUserId,
+    "actorUserId",
+  );
 
   const surgeryName =
     requiredText(
@@ -391,7 +389,8 @@ async function createSurgery(
   if (
     !patientId ||
     !hospitalId ||
-    !userId
+    !userId ||
+    !actorUserId
   ) {
     throw new Error(
       "Authenticated surgery context is incomplete",
@@ -503,6 +502,15 @@ async function createSurgery(
       );
 
     await client.query(
+      `INSERT INTO public.audit_logs (
+         hospital_id, user_id, action_type, entity_type, entity_id,
+         new_values
+       ) VALUES ($1, $2, 'SURGERY_CREATED', 'surgery', $3, $4::jsonb);`,
+      [hospitalId, actorUserId, result.rows[0].surgery_id,
+        JSON.stringify({ patientId, encounterId, surgeonUserId: userId })],
+    );
+
+    await client.query(
       "COMMIT",
     );
 
@@ -554,19 +562,23 @@ async function getPatientClinicalContext(
     await pool.query(
       `
         SELECT
-          patient_id,
-          patient_number,
-          first_name,
-          middle_name,
-          last_name,
-          date_of_birth,
-          gender,
-          hospital_id,
-          status
-        FROM public.patients
+          p.patient_id,
+          p.patient_number,
+          p.first_name,
+          p.middle_name,
+          p.last_name,
+          p.date_of_birth,
+          p.gender,
+          p.status
+        FROM public.patients p
         WHERE
-          patient_id = $1
-          AND hospital_id = $2
+          p.patient_id = $1
+          AND EXISTS (
+            SELECT 1 FROM public.patient_hospital_registrations phr
+            WHERE phr.patient_id = p.patient_id
+              AND phr.hospital_id = $2
+              AND phr.status = 'ACTIVE'
+          )
         LIMIT 1;
       `,
       [
@@ -680,10 +692,10 @@ async function getPatientSurgeries(
         FROM public.surgeries s
         INNER JOIN public.patients p
           ON p.patient_id = s.patient_id
-         AND p.hospital_id = $2
-        LEFT JOIN public.encounters e
+        INNER JOIN public.encounters e
           ON e.encounter_id = s.encounter_id
          AND e.patient_id = s.patient_id
+         AND e.hospital_id = $2
         LEFT JOIN public.admissions a
           ON a.admission_id = s.admission_id
          AND a.patient_id = s.patient_id
@@ -750,9 +762,9 @@ async function getSurgeryById(
         FROM public.surgeries s
         INNER JOIN public.patients p
           ON p.patient_id = s.patient_id
-         AND p.hospital_id = $2
-        LEFT JOIN public.encounters e
+        INNER JOIN public.encounters e
           ON e.encounter_id = s.encounter_id
+         AND e.hospital_id = $2
         LEFT JOIN public.admissions a
           ON a.admission_id = s.admission_id
         LEFT JOIN public.wards w

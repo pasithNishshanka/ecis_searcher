@@ -5,6 +5,7 @@ const {
   authenticate,
 } =
   require("../middleware/auth.middleware");
+const { authorizeRoles } = require("../middleware/authorization.middleware");
 
 const {
   createMedicationOrder,
@@ -40,6 +41,7 @@ router.use(
  */
 router.post(
   "/orders",
+  authorizeRoles("DOCTOR"),
   createMedicationOrder,
 );
 
@@ -82,6 +84,7 @@ router.get(
  */
 router.post(
   "/orders/:medicationOrderId/dispense",
+  authorizeRoles("PHARMACIST"),
   dispenseMedication,
 );
 
@@ -104,6 +107,7 @@ router.get(
  */
 router.put(
   "/orders/:medicationOrderId/cancel",
+  authorizeRoles("DOCTOR", "PHARMACIST"),
   cancelMedicationOrder,
 );
 

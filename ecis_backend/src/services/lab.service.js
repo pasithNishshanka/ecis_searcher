@@ -102,7 +102,12 @@ async function getPatientInHospital(
       FROM public.patients p
       WHERE
         p.patient_id = $1
-        AND p.hospital_id = $2
+        AND EXISTS (
+          SELECT 1 FROM public.patient_hospital_registrations phr
+          WHERE phr.patient_id = p.patient_id
+            AND phr.hospital_id = $2
+            AND phr.status = 'ACTIVE'
+        )
         AND p.status = 'ACTIVE'
         AND p.date_of_birth <=
             CURRENT_DATE - INTERVAL '18 years'
@@ -224,7 +229,7 @@ async function getLabOrderById(
 
       WHERE
         i.investigation_id = $1
-        AND p.hospital_id = $2
+        AND e.hospital_id = $2
         AND i.investigation_type IN (
           'LAB',
           'LABORATORY'
@@ -548,7 +553,7 @@ async function getPatientLabOrders(
 
         WHERE
           i.patient_id = $1
-          AND p.hospital_id = $2
+          AND e.hospital_id = $2
           AND i.investigation_type IN (
             'LAB',
             'LABORATORY'
@@ -642,9 +647,12 @@ async function recordLabResult(
           INNER JOIN public.patients p
             ON p.patient_id = i.patient_id
 
+          INNER JOIN public.encounters e
+            ON e.encounter_id = i.encounter_id
+
           WHERE
             i.investigation_id = $1
-            AND p.hospital_id = $2
+            AND e.hospital_id = $2
             AND i.investigation_type IN (
               'LAB',
               'LABORATORY'
@@ -813,9 +821,12 @@ async function verifyLabResult(
           INNER JOIN public.patients p
             ON p.patient_id = i.patient_id
 
+          INNER JOIN public.encounters e
+            ON e.encounter_id = i.encounter_id
+
           WHERE
             i.investigation_id = $1
-            AND p.hospital_id = $2
+            AND e.hospital_id = $2
             AND i.investigation_type IN (
               'LAB',
               'LABORATORY'

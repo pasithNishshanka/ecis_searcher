@@ -18,6 +18,7 @@ const {
 
 const router =
   express.Router();
+const { authorizeRoles } = require("../middleware/authorization.middleware");
 
 const {
   uploadRadiologyImages,
@@ -47,6 +48,7 @@ router.get(
 
 router.post(
   "/orders/:investigationId/images",
+  authorizeRoles("RADIOLOGIST"),
   uploadRadiologyImages,
   uploadOrderImages,
 );
@@ -58,16 +60,19 @@ router.get(
 
 router.post(
   "/orders",
+  authorizeRoles("DOCTOR", "NURSE"),
   createOrder,
 );
 
 router.put(
   "/orders/:investigationId/report",
+  authorizeRoles("RADIOLOGIST"),
   recordReport,
 );
 
 router.post(
   "/orders/:investigationId/verify",
+  authorizeRoles("RADIOLOGIST"),
   verifyReport,
 );
 

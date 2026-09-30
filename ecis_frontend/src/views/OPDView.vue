@@ -284,6 +284,16 @@ visit in history
                         " placeholder="Medicine / Cardiology / Orthopaedics" required :disabled="saving" />
                 </FormField>
 
+                <FormField v-if="requiresDoctorSelection" label="Consulting doctor" required>
+                    <BaseSelect v-model="selectedDoctorId" required :disabled="saving">
+                        <option value="">Select an assigned doctor</option>
+                        <option v-for="doctor in doctorOptions" :key="doctor.userId" :value="String(doctor.userId)">
+                            {{ doctor.fullName }}{{ doctor.designation ? ` · ${doctor.designation}` : "" }}
+                        </option>
+                    </BaseSelect>
+                    <p v-if="!doctorOptions.length" class="muted mt-1">No doctor is assigned to this hospital. Add one in Settings.</p>
+                </FormField>
+
                 <div class="sm:col-span-2">
                     <FormField label="Chief complaint" required>
                         <BaseInput v-model="form.chiefComplaint
@@ -323,12 +333,6 @@ visit in history
                     </div>
                 </div>
 
-                <div class="sm:col-span-2 rounded-xl bg-slate-50 p-3 text-xs leading-5 text-slate-500">
-                    The authenticated hospital user is recorded as the consulting user by the backend. The frontend does
-                    not
-                    choose or spoof a doctor ID.
-                </div>
-
                 <div class="sm:col-span-2 flex justify-end gap-2 border-t pt-4">
                     <BaseButton variant="secondary" type="button" :disabled="saving" @click="
                         closeForm
@@ -336,7 +340,7 @@ visit in history
                         Cancel
                     </BaseButton>
 
-                    <BaseButton type="submit" :disabled="saving">
+                    <BaseButton type="submit" :disabled="saving || (requiresDoctorSelection && !selectedDoctorId)">
                         {{
                             saving
                                 ? "Saving..."
@@ -374,6 +378,8 @@ import Modal from "../components/Modal.vue";
 import BaseButton from "../components/ui/BaseButton.vue";
 
 import BaseInput from "../components/ui/BaseInput.vue";
+
+import BaseSelect from "../components/ui/BaseSelect.vue";
 
 import BaseTextarea from "../components/ui/BaseTextarea.vue";
 
@@ -458,6 +464,31 @@ const selected =
 
 const open =
     ref(false);
+
+type DoctorOption = { userId: number; fullName: string; designation: string | null };
+const doctorOptions = ref<DoctorOption[]>([]);
+const selectedDoctorId = ref("");
+const requiresDoctorSelection = (() => {
+    try {
+        return String(JSON.parse(localStorage.getItem("ecis-user") || "{}").role || "").toUpperCase() !== "DOCTOR";
+    } catch {
+        return true;
+    }
+})();
+
+async function loadDoctors() {
+    try {
+        const response = await apiGet<{ data?: DoctorOption[] }>("/providers?role=DOCTOR");
+        doctorOptions.value = response.data || [];
+    } catch (cause) {
+        doctorOptions.value = [];
+        error.value = cause instanceof Error ? cause.message : "Unable to load doctors.";
+    }
+}
+
+watch(open, (isOpen) => {
+    if (isOpen && requiresDoctorSelection) void loadDoctors();
+});
 
 const saving =
     ref(false);
@@ -681,6 +712,8 @@ async function save() {
                     Number(
                         selected.value.id,
                     ),
+
+                doctorUserId: requiresDoctorSelection ? Number(selectedDoctorId.value) : undefined,
 
                 visitDate:
                     form.visitDate,

@@ -768,6 +768,19 @@
         </div>
 
 
+        <FormField v-if="requiresDoctorSelection" label="Prescribing doctor" required>
+          <BaseSelect v-model="selectedDoctorId" required :disabled="savingOrder">
+            <option value="">Select a doctor</option>
+            <option v-for="doctor in doctorOptions" :key="doctor.userId" :value="String(doctor.userId)">
+              {{ doctor.fullName }}
+            </option>
+          </BaseSelect>
+          <p v-if="!doctorOptions.length" class="muted mt-1">
+            No doctor is assigned to this hospital. Add one in Settings.
+          </p>
+        </FormField>
+
+
         <!-- Medication -->
         <FormField
           label="Medication name"
@@ -1081,7 +1094,7 @@
 
 
         <!-- Security -->
-        <div
+        <div v-if="!requiresDoctorSelection"
           class="sm:col-span-2 rounded-xl bg-slate-50 p-3 text-xs leading-5 text-slate-500"
         >
           The authenticated hospital user is recorded by
@@ -1664,6 +1677,27 @@ const {
 const selectedPatient =
   ref<any>(null);
 
+type DoctorOption = { userId: number; fullName: string };
+const doctorOptions = ref<DoctorOption[]>([]);
+const selectedDoctorId = ref("");
+const requiresDoctorSelection = (() => {
+  try {
+    return String(JSON.parse(localStorage.getItem("ecis-user") || "{}").role || "").toUpperCase() !== "DOCTOR";
+  } catch {
+    return true;
+  }
+})();
+
+async function loadDoctors() {
+  try {
+    const response = await apiGet<{ data?: DoctorOption[] }>("/providers?role=DOCTOR");
+    doctorOptions.value = response.data || [];
+  } catch (cause) {
+    doctorOptions.value = [];
+    error.value = cause instanceof Error ? cause.message : "Unable to load doctors.";
+  }
+}
+
 
 const selectedAdmission =
   ref<any>(null);
@@ -1871,7 +1905,8 @@ const canSubmitOrder =
       ) &&
       Boolean(
         orderForm.frequency.trim(),
-      )
+      ) &&
+      (!requiresDoctorSelection || Boolean(selectedDoctorId.value))
     );
   });
 
@@ -2380,6 +2415,9 @@ function openOrderForm(): void {
 
   resetOrderForm();
 
+  selectedDoctorId.value = "";
+  if (requiresDoctorSelection) void loadDoctors();
+
   orderFormOpen.value =
     true;
 }
@@ -2456,6 +2494,8 @@ async function submitOrder(): Promise<void> {
         encounterId,
 
         admissionId,
+
+        prescribedByUserId: requiresDoctorSelection ? Number(selectedDoctorId.value) : undefined,
 
         medicationName:
           orderForm.medicationName.trim(),

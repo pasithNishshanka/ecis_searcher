@@ -12,6 +12,7 @@ async function getCandidateEvidence(
 
     const hospitalId =
       Number(req.user?.hospitalId);
+    const accessedBy = Number(req.user?.userId);
 
     const emergencyCaseId = req.query.emergencyCaseId == null
       ? null
@@ -37,6 +38,13 @@ async function getCandidateEvidence(
       });
     }
 
+    if (!Number.isInteger(accessedBy) || accessedBy <= 0) {
+      return res.status(401).json({
+        success: false,
+        message: "Authenticated user is required",
+      });
+    }
+
     if (emergencyCaseId !== null &&
         (!Number.isInteger(emergencyCaseId) || emergencyCaseId <= 0)) {
       return res.status(400).json({
@@ -50,6 +58,7 @@ async function getCandidateEvidence(
         patientId,
         hospitalId,
         emergencyCaseId,
+        accessedBy,
       );
 
     return res.status(200).json({

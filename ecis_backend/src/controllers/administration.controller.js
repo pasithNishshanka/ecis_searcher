@@ -12,7 +12,8 @@ function statusForError(error) {
     message.includes("must be") ||
     message.includes("cannot be") ||
     message.includes("not available") ||
-    message.includes("at least two")
+    message.includes("at least two") ||
+    message.includes("provisioned separately")
   ) {
     return 400;
   }
@@ -21,7 +22,8 @@ function statusForError(error) {
     message.includes("only manage") ||
     message.includes("cannot grant") ||
     message.includes("only create") ||
-    message.includes("Only a system")
+    message.includes("Only a system") ||
+    message.includes("Only the current")
   ) {
     return 403;
   }

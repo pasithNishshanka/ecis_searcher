@@ -93,6 +93,9 @@ async function confirmIdentity(
             patient_id,
             encounter_id,
             case_number,
+            arrival_date,
+            chief_complaint,
+            initial_condition,
             unidentified_patient,
             status
           FROM public.emergency_cases
@@ -206,25 +209,22 @@ async function confirmIdentity(
       await client.query(
         `
           SELECT
-            user_id,
-            hospital_id,
-            full_name,
-            role,
-            is_active
-          FROM public.hospital_users
+            u.user_id,
+            a.hospital_id,
+            u.full_name,
+            a.role,
+            u.is_active
+          FROM public.hospital_users u
+          INNER JOIN public.hospital_user_assignments a
+            ON a.user_id = u.user_id
           WHERE
-            user_id = $1
-            AND EXISTS (
-              SELECT 1
-              FROM public.hospital_user_assignments a
-              WHERE a.user_id = hospital_users.user_id
-                AND a.hospital_id = $2
-                AND a.status = 'ACTIVE'
-                AND a.start_date <= CURRENT_DATE
-                AND (a.end_date IS NULL OR a.end_date >= CURRENT_DATE)
-            )
+            u.user_id = $1
+            AND a.hospital_id = $2
+            AND a.status = 'ACTIVE'
+            AND a.start_date <= CURRENT_DATE
+            AND (a.end_date IS NULL OR a.end_date >= CURRENT_DATE)
           LIMIT 1
-          FOR SHARE;
+          FOR SHARE OF u, a;
         `,
         [
           reviewerUserId,
@@ -302,6 +302,10 @@ async function confirmIdentity(
       );
     }
 
+    if (!emergencyCase.unidentified_patient) {
+      throw new Error("Emergency case identity has already been confirmed");
+    }
+
     await client.query(
       `
         INSERT INTO public.patient_hospital_registrations (
@@ -315,12 +319,44 @@ async function confirmIdentity(
       [patientId, hospitalId, patient.patient_number, reviewerUserId],
     );
 
+    let encounterId = emergencyCase.encounter_id;
+    if (encounterId) {
+      const linkedEncounter = await client.query(
+        `SELECT encounter_id FROM public.encounters
+          WHERE encounter_id = $1 AND patient_id = $2 AND hospital_id = $3
+          FOR UPDATE;`,
+        [encounterId, patientId, hospitalId],
+      );
+      if (linkedEncounter.rowCount === 0) {
+        throw new Error("Emergency case encounter does not match the confirmed patient and hospital");
+      }
+    } else {
+      const encounterResult = await client.query(
+        `INSERT INTO public.encounters (
+           patient_id, hospital_id, encounter_type, encounter_date,
+           department, status, chief_complaint, notes
+         ) VALUES (
+           $1, $2, 'EMERGENCY', $3, 'Emergency Department',
+           'OPEN', $4, $5
+         ) RETURNING encounter_id;`,
+        [
+          patientId,
+          hospitalId,
+          emergencyCase.arrival_date,
+          emergencyCase.chief_complaint,
+          emergencyCase.initial_condition,
+        ],
+      );
+      encounterId = encounterResult.rows[0].encounter_id;
+    }
+
     const updateResult =
       await client.query(
         `
           UPDATE public.emergency_cases
           SET
             patient_id = $1,
+            encounter_id = $5,
 
             unidentified_patient =
               FALSE,
@@ -353,6 +389,7 @@ async function confirmIdentity(
           reviewerUserId,
           emergencyCaseId,
           hospitalId,
+          encounterId,
         ],
       );
 

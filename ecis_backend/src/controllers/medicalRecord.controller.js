@@ -2,6 +2,7 @@ const medicalRecordService =
   require(
     "../services/medicalRecord.service",
   );
+const pool = require("../config/database");
 
 
 function positiveInteger(
@@ -67,6 +68,13 @@ async function getPatientMedicalRecord(
         patientId,
         hospitalId,
       );
+
+    await pool.query(
+      `INSERT INTO public.audit_logs (
+         hospital_id, user_id, action_type, entity_type, entity_id
+       ) VALUES ($1, $2, 'PATIENT_360_ACCESSED', 'patient', $3);`,
+      [hospitalId, Number(req.user?.userId), patientId],
+    );
 
 
     return res.status(200).json({

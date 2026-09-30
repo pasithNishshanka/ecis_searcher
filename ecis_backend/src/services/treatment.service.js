@@ -82,7 +82,12 @@ async function createTreatment(
         FROM public.patients
         WHERE
           patient_id = $1
-          AND hospital_id = $2
+          AND EXISTS (
+            SELECT 1 FROM public.patient_hospital_registrations phr
+            WHERE phr.patient_id = patients.patient_id
+              AND phr.hospital_id = $2
+              AND phr.status = 'ACTIVE'
+          )
           AND status = 'ACTIVE'
         FOR SHARE;
         `,
@@ -103,11 +108,18 @@ async function createTreatment(
         await client.query(
           `
           SELECT user_id
-          FROM public.hospital_users
+          FROM public.hospital_users u
           WHERE
-            user_id = $1
-            AND hospital_id = $2
-            AND is_active = TRUE;
+            u.user_id = $1
+            AND u.is_active = TRUE
+            AND EXISTS (
+              SELECT 1 FROM public.hospital_user_assignments a
+              WHERE a.user_id = u.user_id
+                AND a.hospital_id = $2
+                AND a.status = 'ACTIVE'
+                AND a.start_date <= CURRENT_DATE
+                AND (a.end_date IS NULL OR a.end_date >= CURRENT_DATE)
+            );
           `,
           [
             performedBy,
@@ -370,7 +382,7 @@ async function getPatientTreatments(
 
       WHERE
         t.patient_id = $1
-        AND p.hospital_id = $2
+        AND e.hospital_id = $2
 
       ORDER BY
         t.treatment_date DESC,
@@ -413,9 +425,12 @@ async function getTreatmentById(
           ON u.user_id =
              t.performed_by
 
+      INNER JOIN public.encounters e
+        ON e.encounter_id = t.encounter_id
+
       WHERE
         t.treatment_id = $1
-        AND p.hospital_id = $2
+        AND e.hospital_id = $2
 
       LIMIT 1;
       `,
@@ -493,7 +508,7 @@ async function getAllTreatments(
       LEFT JOIN public.admissions a ON a.admission_id = t.admission_id
 
       WHERE
-        p.hospital_id = $1
+        e.hospital_id = $1
 
       ORDER BY
         t.treatment_date DESC,

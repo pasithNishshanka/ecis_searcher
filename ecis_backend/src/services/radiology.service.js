@@ -197,7 +197,12 @@ async function assertPatient(
         FROM public.patients p
         WHERE
           p.patient_id = $1
-          AND p.hospital_id = $2
+          AND EXISTS (
+            SELECT 1 FROM public.patient_hospital_registrations phr
+            WHERE phr.patient_id = p.patient_id
+              AND phr.hospital_id = $2
+              AND phr.status = 'ACTIVE'
+          )
           AND p.status = 'ACTIVE'
           AND p.date_of_birth <=
               CURRENT_DATE - INTERVAL '18 years'
@@ -266,13 +271,20 @@ async function assertActiveUser(
     await client.query(
       `
         SELECT
-          user_id,
-          full_name
-        FROM public.hospital_users
+          u.user_id,
+          u.full_name
+        FROM public.hospital_users u
         WHERE
-          user_id = $1
-          AND hospital_id = $2
-          AND is_active = TRUE;
+          u.user_id = $1
+          AND u.is_active = TRUE
+          AND EXISTS (
+            SELECT 1 FROM public.hospital_user_assignments a
+            WHERE a.user_id = u.user_id
+              AND a.hospital_id = $2
+              AND a.status = 'ACTIVE'
+              AND a.start_date <= CURRENT_DATE
+              AND (a.end_date IS NULL OR a.end_date >= CURRENT_DATE)
+          );
       `,
       [
         userId,
@@ -334,7 +346,7 @@ async function getOrderById(
 
         WHERE
           i.investigation_id = $1
-          AND p.hospital_id = $2
+          AND e.hospital_id = $2
           AND i.investigation_type =
               'IMAGING'
 
@@ -467,7 +479,7 @@ async function getPatientOrders(
 
         WHERE
           i.patient_id = $1
-          AND p.hospital_id = $2
+          AND e.hospital_id = $2
           AND i.investigation_type =
               'IMAGING'
 
@@ -720,9 +732,12 @@ async function recordReport(
             ON p.patient_id =
                i.patient_id
 
+          INNER JOIN public.encounters e
+            ON e.encounter_id = i.encounter_id
+
           WHERE
             i.investigation_id = $1
-            AND p.hospital_id = $2
+            AND e.hospital_id = $2
             AND i.investigation_type =
                 'IMAGING'
 
@@ -854,9 +869,12 @@ async function verifyReport(
             ON p.patient_id =
                i.patient_id
 
+          INNER JOIN public.encounters e
+            ON e.encounter_id = i.encounter_id
+
           WHERE
             i.investigation_id = $1
-            AND p.hospital_id = $2
+            AND e.hospital_id = $2
             AND i.investigation_type =
                 'IMAGING'
 
@@ -988,7 +1006,6 @@ async function getOrderImages(
       WHERE
         ri.investigation_id = $1
         AND ri.hospital_id = $2
-        AND p.hospital_id = $2
         AND ri.is_active = TRUE
         AND i.investigation_type = 'IMAGING'
       ORDER BY
@@ -1073,9 +1090,11 @@ async function attachImages(
         FROM public.investigations i
         INNER JOIN public.patients p
           ON p.patient_id = i.patient_id
+        INNER JOIN public.encounters e
+          ON e.encounter_id = i.encounter_id
         WHERE
           i.investigation_id = $1
-          AND p.hospital_id = $2
+          AND e.hospital_id = $2
           AND i.investigation_type = 'IMAGING'
         FOR UPDATE OF i;
       `,
@@ -1196,7 +1215,6 @@ async function getImageFile(
       WHERE
         ri.radiology_image_id = $1
         AND ri.hospital_id = $2
-        AND p.hospital_id = $2
         AND ri.is_active = TRUE
         AND i.investigation_type = 'IMAGING'
       LIMIT 1;
