@@ -205,6 +205,7 @@
         <form class="rounded-xl border border-slate-200 p-4" @submit.prevent="saveAssignment">
           <h3 class="font-bold text-slate-900">2. Add hospital assignment</h3>
           <p class="mt-1 text-xs leading-5 text-slate-500">{{ selectedStaff ? `Selected: ${selectedStaff.fullName}` : "Select a staff account before saving an assignment." }}</p>
+          <p v-if="selectedStaff?.internalClinicianId" class="mt-1 text-xs text-slate-500">Internal clinician ID: {{ selectedStaff.internalClinicianId }}</p>
 
           <div class="mt-4 grid gap-4 sm:grid-cols-2">
             <label class="label">
@@ -216,13 +217,13 @@
             </label>
             <label class="label">
               Assignment role
-              <select v-model="assignmentForm.role" class="field mt-1">
+              <select v-model="assignmentForm.role" class="field mt-1" @change="onAssignmentRoleChange">
                 <option v-for="role in assignmentRoles" :key="role" :value="role">{{ role.replaceAll("_", " ") }}</option>
               </select>
             </label>
             <label class="label">
               Department
-              <select v-model="assignmentForm.department" class="field mt-1">
+              <select v-model="assignmentForm.department" class="field mt-1" @change="onAssignmentDepartmentChange">
                 <option value="">Select department</option>
                 <option v-if="assignmentForm.department && !departmentOptions.includes(assignmentForm.department)" :value="assignmentForm.department">{{ assignmentForm.department }} (existing)</option>
                 <option v-for="department in departmentOptions" :key="department" :value="department">{{ department }}</option>
@@ -231,16 +232,20 @@
             <label class="label">
               Designation
               <input v-model.trim="assignmentForm.designation" class="field mt-1" placeholder="e.g. Medical Officer">
+              <span class="mt-1 block text-xs font-normal text-slate-500">Suggested from the role and department. Confirm or edit the actual job title.</span>
             </label>
             <label class="label">
               Professional license
-              <input v-model.trim="assignmentForm.licenseNumber" class="field mt-1" placeholder="Optional">
+              <input v-model.trim="assignmentForm.licenseNumber" class="field mt-1" placeholder="Actual registration number, if known">
+              <span class="mt-1 block text-xs font-normal text-slate-500">An existing number on file is filled when you select staff. ECIS does not issue professional licenses.</span>
             </label>
             <label class="label">
               Start date
               <input v-model="assignmentForm.startDate" class="field mt-1" type="date">
             </label>
           </div>
+
+          <p v-if="assignmentRoleNotice" class="mt-3 rounded-lg bg-amber-50 p-3 text-xs text-amber-900">{{ assignmentRoleNotice }}</p>
 
           <BaseButton class="mt-5" type="submit" :loading="assignmentSaving" :disabled="!selectedStaff || !assignmentForm.hospitalId || !assignmentForm.role">
             Save assignment
@@ -379,7 +384,6 @@ const suggestedDesignationByRole: Record<string, string> = {
   ECIS_SEARCHER: "Records Officer",
 };
 const defaultRoleByDepartment: Record<string, string> = {
-  Administration: "ADMIN",
   OPD: "DOCTOR",
   Clinics: "DOCTOR",
   "Emergency Department": "DOCTOR",
@@ -413,6 +417,7 @@ const hospitalSaving = ref(false);
 const staffAccountSaving = ref(false);
 const lastCreatedStaff = ref<Staff | null>(null);
 let staffRoleChosenManually = false;
+let assignmentRoleChosenManually = false;
 
 const assignmentForm = ref({
   hospitalId: null as number | null,
@@ -460,6 +465,11 @@ const staffRoleNotice = computed(() => {
   if (!defaultRole || defaultRole === staffAccountForm.value.role) return "";
   return `The usual role for ${staffAccountForm.value.department} is ${defaultRole.replaceAll("_", " ")}. Confirm that the selected ${staffAccountForm.value.role.replaceAll("_", " ")} role matches this staff member's actual duties.`;
 });
+const assignmentRoleNotice = computed(() => {
+  const defaultRole = defaultRoleByDepartment[assignmentForm.value.department];
+  if (!defaultRole || defaultRole === assignmentForm.value.role) return "";
+  return `The usual role for ${assignmentForm.value.department} is ${defaultRole.replaceAll("_", " ")}. Confirm that the selected ${assignmentForm.value.role.replaceAll("_", " ")} role matches this staff member's actual duties.`;
+});
 
 function messageFrom(errorValue: unknown, fallback: string) {
   return errorValue instanceof Error ? errorValue.message : fallback;
@@ -470,14 +480,16 @@ function clearFeedback() {
   success.value = "";
 }
 
-function suggestStaffDesignation() {
-  const suggestion = staffAccountForm.value.department === "Dental" && staffAccountForm.value.role === "DOCTOR"
+function designationSuggestion(role: string, department: string) {
+  return department === "Dental" && role === "DOCTOR"
     ? "Dental Surgeon"
-    : staffAccountForm.value.department
-      ? suggestedDesignationByRole[staffAccountForm.value.role] || ""
+    : department
+      ? suggestedDesignationByRole[role] || ""
       : "";
+}
 
-  staffAccountForm.value.designation = suggestion;
+function suggestStaffDesignation() {
+  staffAccountForm.value.designation = designationSuggestion(staffAccountForm.value.role, staffAccountForm.value.department);
 }
 
 function onStaffDepartmentChange() {
@@ -491,6 +503,19 @@ function onStaffDepartmentChange() {
 function onStaffRoleChange() {
   staffRoleChosenManually = true;
   suggestStaffDesignation();
+}
+
+function onAssignmentDepartmentChange() {
+  const defaultRole = defaultRoleByDepartment[assignmentForm.value.department];
+  if (!selectedStaff.value && !assignmentRoleChosenManually && defaultRole) {
+    assignmentForm.value.role = defaultRole;
+  }
+  assignmentForm.value.designation = designationSuggestion(assignmentForm.value.role, assignmentForm.value.department);
+}
+
+function onAssignmentRoleChange() {
+  assignmentRoleChosenManually = true;
+  assignmentForm.value.designation = designationSuggestion(assignmentForm.value.role, assignmentForm.value.department);
 }
 
 async function loadContext() {
@@ -576,6 +601,7 @@ async function createStaffAccount() {
       assignmentForm.value.department = staff.accountDepartment || "";
       assignmentForm.value.designation = staff.designation || "";
       assignmentForm.value.licenseNumber = staff.licenseNumber || "";
+      assignmentRoleChosenManually = false;
       success.value = `Created login for ${staff.fullName}. Employee number: ${staff.employeeNumber}.${staff.internalClinicianId ? ` Internal clinician ID: ${staff.internalClinicianId}.` : ""}${staff.licenseNumber ? ` Professional license on file: ${staff.licenseNumber}.` : ""} The staff member can now sign in with the credentials you provided.`;
     } else {
       success.value = "Staff login created.";
@@ -602,7 +628,11 @@ async function createStaffAccount() {
 
 function selectStaff(staff: Staff) {
   selectedStaff.value = staff;
+  assignmentRoleChosenManually = false;
+  if (assignmentRoles.includes(staff.accountRole)) assignmentForm.value.role = staff.accountRole;
   assignmentForm.value.department = staff.accountDepartment || "";
+  assignmentForm.value.designation = staff.designation || designationSuggestion(assignmentForm.value.role, assignmentForm.value.department);
+  assignmentForm.value.licenseNumber = staff.licenseNumber || "";
 }
 
 async function saveAssignment() {

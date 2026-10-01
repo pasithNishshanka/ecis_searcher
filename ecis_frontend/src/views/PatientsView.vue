@@ -575,9 +575,6 @@
                   form.allergyStatus
                 "
                 required
-                @change="
-                  handleAllergyStatusChange
-                "
               >
                 <option value="">
                   Select allergy status
@@ -606,7 +603,9 @@
           <div
             v-if="
               form.allergyStatus ===
-              'HAS_ALLERGIES'
+              'HAS_ALLERGIES' &&
+              !form.foodAllergies.length &&
+              !form.medicalAllergies.length
             "
             class="mt-4 rounded-xl border border-amber-200 bg-white p-3 text-xs text-amber-800"
           >
@@ -623,6 +622,7 @@
             class="mt-4 grid gap-5 sm:grid-cols-2"
           >
             <TagInput
+              ref="foodAllergyInput"
               v-model="
                 form.foodAllergies
               "
@@ -632,6 +632,7 @@
 
 
             <TagInput
+              ref="medicalAllergyInput"
               v-model="
                 form.medicalAllergies
               "
@@ -659,6 +660,23 @@
 
 
         <!-- ERROR -->
+        <section v-if="canEnrollFace" class="space-y-3">
+          <FaceCapture
+            :key="faceCaptureKey"
+            label="Optional face identity clue"
+            @descriptor="faceDescriptor = $event"
+            @processing="faceProcessing = $event"
+          />
+          <label v-if="faceDescriptor" class="flex items-start gap-2 text-sm text-slate-700">
+            <input v-model="faceConsent" type="checkbox" class="mt-1 size-4 accent-teal-700" />
+            <span>I have recorded the patient's consent to enroll a face template for identity search.</span>
+          </label>
+          <div v-if="editing && faceEnrolled" class="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white p-3">
+            <span class="text-sm text-slate-700">A face profile is enrolled for this patient.</span>
+            <button type="button" class="text-sm font-semibold text-red-700 underline" :disabled="saving" @click="removeFaceProfile">Remove profile</button>
+          </div>
+        </section>
+
         <div
           v-if="error"
           class="rounded-xl bg-red-50 p-4 text-sm text-red-700"
@@ -683,7 +701,7 @@
 
           <BaseButton
             type="submit"
-            :disabled="saving"
+            :disabled="saving || faceProcessing"
           >
             {{
               saving
@@ -730,6 +748,7 @@ import {
   computed,
   reactive,
   ref,
+  watch,
 } from "vue";
 
 import {
@@ -766,12 +785,14 @@ import BaseTextarea
 
 import FormField
   from "../components/forms/FormField.vue";
+import FaceCapture from "../components/FaceCapture.vue";
+import { FACE_MODEL_ID } from "../services/faceRecognition";
 
 import {
   useEHR,
 } from "../stores/ehr";
 
-import { apiGet, apiPost } from "../services/api";
+import { apiDelete, apiGet, apiPost } from "../services/api";
 
 import {
   calculateAge,
@@ -882,6 +903,55 @@ const saving =
 
 const error =
   ref("");
+
+const foodAllergyInput = ref<InstanceType<typeof TagInput> | null>(null);
+const medicalAllergyInput = ref<InstanceType<typeof TagInput> | null>(null);
+
+const faceUserRole = String(JSON.parse(localStorage.getItem("ecis-user") || "{}").role || "").toUpperCase();
+const canEnrollFace = ["DOCTOR", "ADMIN"].includes(faceUserRole) ||
+  (import.meta.env.DEV && faceUserRole === "SYSTEM_ADMIN");
+const faceDescriptor = ref<number[] | null>(null);
+const faceProcessing = ref(false);
+const faceConsent = ref(false);
+const faceCaptureKey = ref(0);
+const faceEnrolled = ref(false);
+
+function resetFaceCapture() {
+  faceDescriptor.value = null;
+  faceProcessing.value = false;
+  faceConsent.value = false;
+  faceCaptureKey.value += 1;
+  faceEnrolled.value = false;
+}
+
+async function loadFaceStatus(patientId: string) {
+  if (!canEnrollFace) return;
+  try {
+    const response = await apiGet<{ data?: { enrolled?: boolean } }>(
+      `/patients/${encodeURIComponent(patientId)}/face-profile`,
+    );
+    if (editingId.value === patientId) faceEnrolled.value = Boolean(response.data?.enrolled);
+  } catch {
+    // Enrollment remains optional if status cannot be loaded.
+  }
+}
+
+async function removeFaceProfile() {
+  if (!editingId.value || saving.value) return;
+  saving.value = true;
+  try {
+    await apiDelete(`/patients/${encodeURIComponent(editingId.value)}/face-profile`);
+    faceEnrolled.value = false;
+    faceDescriptor.value = null;
+    faceConsent.value = false;
+    faceCaptureKey.value += 1;
+    showToast("Face profile removed", "This patient will no longer appear in face-photo searches.", "success");
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : "Unable to remove the face profile.";
+  } finally {
+    saving.value = false;
+  }
+}
 
 
 /*
@@ -1106,6 +1176,7 @@ function openRegisterModal() {
   }
 
   resetForm();
+  resetFaceCapture();
 
   error.value = "";
 
@@ -1139,6 +1210,7 @@ function closeModal() {
   editingId.value = "";
 
   error.value = "";
+  resetFaceCapture();
 }
 
 
@@ -1151,10 +1223,12 @@ function closeModal() {
 function startEdit(
   patient: any,
 ) {
+  resetFaceCapture();
   editing.value = true;
 
   editingId.value =
     patient.id;
+  void loadFaceStatus(patient.id);
 
   Object.assign(
     form,
@@ -1257,16 +1331,26 @@ function handleProvinceChange() {
  * ============================================================
  */
 
-function handleAllergyStatusChange() {
-  if (
-    form.allergyStatus !==
-    "HAS_ALLERGIES"
-  ) {
+watch(() => form.allergyStatus, (status) => {
+  if (status !== "HAS_ALLERGIES") {
     form.foodAllergies = [];
-
     form.medicalAllergies = [];
   }
-}
+  if (/allerg/i.test(error.value)) {
+    error.value = "";
+    toast.visible = false;
+  }
+});
+
+watch(
+  () => `${form.foodAllergies.join("\u0000")}|${form.medicalAllergies.join("\u0000")}`,
+  () => {
+    if (/allerg/i.test(error.value)) {
+      error.value = "";
+      toast.visible = false;
+    }
+  },
+);
 
 
 /*
@@ -1303,12 +1387,20 @@ function showToast(
  */
 
 async function savePatient() {
+  if (faceProcessing.value) return;
+  if (form.allergyStatus === "HAS_ALLERGIES") {
+    foodAllergyInput.value?.commitDraft();
+    medicalAllergyInput.value?.commitDraft();
+  }
   saving.value = true;
 
   error.value = "";
 
 
   try {
+    if (faceDescriptor.value && !faceConsent.value) {
+      throw new Error("Record patient consent before enrolling a face template.");
+    }
     const calculatedAge =
       calculateAge(
         form.dateOfBirth,
@@ -1443,6 +1535,7 @@ async function savePatient() {
 
     const wasEditing =
       editing.value;
+    let savedPatientId = editingId.value;
 
 
     /*
@@ -1474,7 +1567,7 @@ async function savePatient() {
      */
 
     else {
-      await addPatient({
+      const savedPatient = await addPatient({
         ...form,
 
         allergies: [
@@ -1482,6 +1575,20 @@ async function savePatient() {
           ...form.medicalAllergies,
         ],
       });
+      savedPatientId = savedPatient.id;
+    }
+
+    let enrollmentError = "";
+    if (faceDescriptor.value) {
+      try {
+        await apiPost(`/patients/${encodeURIComponent(savedPatientId)}/face-profile`, {
+          descriptor: faceDescriptor.value,
+          modelId: FACE_MODEL_ID,
+          consent: faceConsent.value,
+        });
+      } catch (cause) {
+        enrollmentError = cause instanceof Error ? cause.message : "Unable to enroll face profile.";
+      }
     }
 
 
@@ -1491,21 +1598,22 @@ async function savePatient() {
      * --------------------------
      */
 
+    saving.value = false;
     closeModal();
 
     resetForm();
 
-    showToast(
-      wasEditing
-        ? "Patient updated"
-        : "Patient registered",
-
-      wasEditing
-        ? "The existing patient EHR was updated successfully."
-        : "The permanent patient EHR was created successfully.",
-
-      "success",
-    );
+    if (enrollmentError) {
+      showToast("Patient saved; face profile not enrolled", enrollmentError, "error");
+    } else {
+      showToast(
+        wasEditing ? "Patient updated" : "Patient registered",
+        wasEditing
+          ? "The existing patient EHR was updated successfully."
+          : "The permanent patient EHR was created successfully.",
+        "success",
+      );
+    }
   } catch (
     saveError
   ) {

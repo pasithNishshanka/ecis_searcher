@@ -1,5 +1,6 @@
 const ecisService = require("../services/ecis.service");
 const pool = require("../config/database");
+const faceProfiles = require("../services/faceProfile.service");
 
 
 /*
@@ -84,6 +85,7 @@ const evidenceSourceTables = {
   observation: "clinical_observations",
   treatment: "treatment_records",
   investigation: "investigations",
+  face: "patient_face_profiles",
 };
 
 
@@ -395,14 +397,27 @@ const searchECISCandidates = async (
     const {
       emergencyCaseId:
         _ignored,
+      faceDescriptor,
+      faceModelId,
+      facePatientIds: _ignoredFacePatientIds,
       ...directCriteria
     } = criteria;
+
+    const faceSearch = faceDescriptor !== undefined;
+    const faceMatches = faceSearch
+      ? await faceProfiles.findMatches(faceDescriptor, faceModelId)
+      : [];
 
 
     const serviceCriteria =
       normalizeFrontendCriteria(
         directCriteria,
       );
+
+    if (faceSearch && faceMatches.length) {
+      // Only server-computed candidate IDs can constrain the clinical search.
+      serviceCriteria.facePatientIds = faceMatches.map((match) => match.patientId);
+    }
 
 
     /*
@@ -419,11 +434,9 @@ const searchECISCandidates = async (
     }
 
 
-    const serviceResult =
-      await ecisService.searchPatients(
-        serviceCriteria,
-        hospitalId,
-      );
+    const serviceResult = faceSearch && !faceMatches.length
+      ? { candidates: [], weightModel: null }
+      : await ecisService.searchPatients(serviceCriteria, hospitalId);
 
 
     /*
@@ -455,6 +468,24 @@ const searchECISCandidates = async (
         mapCandidate,
       );
 
+    if (faceSearch) {
+      const byPatient = new Map(faceMatches.map((match) => [match.patientId, match]));
+      for (const candidate of candidates) {
+        const match = byPatient.get(Number(candidate.patientId));
+        if (match) {
+          candidate.faceDistance = Number(match.distance.toFixed(3));
+          candidate.evidence.unshift({
+            type: "Possible face match",
+            description: "Biometric clue only. Review clinical evidence before confirming identity.",
+            sourceTable: "patient_face_profiles",
+            key: "face",
+            score: 0,
+          });
+        }
+      }
+      candidates.sort((a, b) => a.faceDistance - b.faceDistance || b.rawScore - a.rawScore);
+    }
+
 
     /*
      * Search is audited.
@@ -476,9 +507,10 @@ const searchECISCandidates = async (
       [
         emergencyCaseId,
         req.user.userId,
-        JSON.stringify(
-          serviceCriteria,
-        ),
+        JSON.stringify({
+          ...directCriteria,
+          faceClueUsed: faceSearch,
+        }),
         candidates.length,
         candidates.map((candidate) => candidate.patientId),
       ],
@@ -535,16 +567,14 @@ const searchECISCandidates = async (
       error,
     );
 
-    return res.status(500).json({
+    return res.status(error.statusCode || 500).json({
       success: false,
 
       message:
-        "Failed to perform ECIS candidate search",
+        error.expose ? error.message : "Failed to perform ECIS candidate search",
 
       error:
-        error instanceof Error
-          ? error.message
-          : "Unknown ECIS search error",
+        error.expose ? error.message : undefined,
     });
   }
 };

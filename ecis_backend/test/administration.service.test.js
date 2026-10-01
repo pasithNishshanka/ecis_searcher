@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const { after, test } = require("node:test");
 
 const pool = require("../src/config/database");
-const { createHospital, createStaffAccount, createOrUpdateAssignment } = require("../src/services/administration.service");
+const { createHospital, createStaffAccount, createOrUpdateAssignment, searchStaff } = require("../src/services/administration.service");
 
 const originalConnect = pool.connect;
 const originalQuery = pool.query;
@@ -128,4 +128,19 @@ test("first clinical assignment gives existing staff an internal clinician ID", 
 
   assert.equal(assignment.internalClinicianId, "ECIS-CLIN-0003");
   assert.equal(statements.at(-1).statement, "COMMIT");
+});
+
+test("staff search returns on-file designation and license for assignment prefill", async () => {
+  pool.query = async (sql, params) => {
+    assert.match(sql, /LEFT JOIN LATERAL/);
+    assert.deepEqual(params, ["%doctor%"]);
+    return {
+      rows: [{ user_id: 9, employee_number: "DOC-001", internal_clinician_id: "ECIS-CLIN-0001", full_name: "Doctor Example", username: "doctor.example", account_role: "DOCTOR", account_department: "OPD", home_hospital_id: 1, home_hospital_name: "General Hospital", designation: "Medical Officer", license_number: "SLMC-12345" }],
+      rowCount: 1,
+    };
+  };
+  const [staff] = await searchStaff("doctor");
+  assert.equal(staff.internalClinicianId, "ECIS-CLIN-0001");
+  assert.equal(staff.designation, "Medical Officer");
+  assert.equal(staff.licenseNumber, "SLMC-12345");
 });

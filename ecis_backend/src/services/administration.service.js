@@ -269,10 +269,19 @@ async function searchStaff(query) {
         u.role AS account_role,
         u.department AS account_department,
         u.hospital_id AS home_hospital_id,
-        h.hospital_name AS home_hospital_name
+        h.hospital_name AS home_hospital_name,
+        credentials.designation,
+        credentials.license_number
       FROM public.hospital_users u
       INNER JOIN public.hospitals h
         ON h.hospital_id = u.hospital_id
+      LEFT JOIN LATERAL (
+        SELECT a.designation, a.license_number
+        FROM public.hospital_user_assignments a
+        WHERE a.user_id = u.user_id AND a.status = 'ACTIVE'
+        ORDER BY a.assignment_id DESC
+        LIMIT 1
+      ) credentials ON TRUE
       WHERE
         u.is_active = TRUE
         AND (
@@ -287,17 +296,7 @@ async function searchStaff(query) {
     [pattern],
   );
 
-  return result.rows.map((row) => ({
-    userId: Number(row.user_id),
-    employeeNumber: row.employee_number,
-    internalClinicianId: row.internal_clinician_id,
-    fullName: row.full_name,
-    username: row.username,
-    accountRole: row.account_role,
-    accountDepartment: row.account_department,
-    homeHospitalId: Number(row.home_hospital_id),
-    homeHospitalName: row.home_hospital_name,
-  }));
+  return result.rows.map(staffResponse);
 }
 
 function staffResponse(row) {
@@ -309,6 +308,8 @@ function staffResponse(row) {
     username: row.username,
     accountRole: row.account_role,
     accountDepartment: row.account_department,
+    designation: row.designation,
+    licenseNumber: row.license_number,
     homeHospitalId: Number(row.home_hospital_id),
     homeHospitalName: row.home_hospital_name,
   };

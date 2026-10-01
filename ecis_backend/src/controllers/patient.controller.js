@@ -2,6 +2,49 @@ const patientService = require("../services/patient.service");
 const medicalRecordService = require("../services/medicalRecord.service");
 const pool = require("../config/database");
 
+function classifyRegistrationError(error) {
+  if (error.code === "23505") {
+    error.statusCode = 409;
+    error.expose = true;
+    error.message = "A patient with this identifier already exists. Find the existing patient instead of registering a duplicate.";
+    return;
+  }
+
+  if (error.message === "A patient with this NIC already exists.") {
+    error.statusCode = 409;
+    error.expose = true;
+    error.message = "A patient with this NIC already exists. Use Find existing patient to register them at this hospital.";
+    return;
+  }
+
+  if (error.message === "Hospital not found.") {
+    error.statusCode = 404;
+    error.expose = true;
+    return;
+  }
+
+  const validationMessages = [
+    "Hospital context is required.",
+    "First name and last name are required.",
+    "Date of birth is required.",
+    "Invalid date of birth.",
+    "Date of birth cannot be in the future.",
+    "Only patients aged between 18 and 120 years can be registered.",
+    "Gender is required.",
+    "Province is required.",
+    "District is required.",
+    "District does not belong to the selected province.",
+    "Allergy status is required.",
+    "Invalid allergy status.",
+    "At least one food or medical / drug allergy is required when allergy status is Has allergies.",
+    "Remove allergy entries or change the allergy status before saving.",
+  ];
+  if (validationMessages.includes(error.message) || /^(Height|Weight) must be a valid number between /.test(error.message)) {
+    error.statusCode = 400;
+    error.expose = true;
+  }
+}
+
 function getHospitalId(req) {
   const hospitalId = Number(req.user?.hospitalId);
 
@@ -37,6 +80,7 @@ async function createPatient(req, res, next) {
       data: patient,
     });
   } catch (error) {
+    classifyRegistrationError(error);
     next(error);
   }
 }

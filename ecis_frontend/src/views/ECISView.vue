@@ -387,9 +387,16 @@
 
           <!-- SEARCH -->
 
+          <FaceCapture
+            :key="faceCaptureKey"
+            label="Optional face photo clue"
+            @descriptor="faceDescriptor = $event"
+            @processing="faceProcessing = $event"
+          />
+
           <BaseButton
             block
-            :disabled="loading"
+            :disabled="loading || faceProcessing"
             @click="run"
           >
             <template #icon>
@@ -555,8 +562,9 @@
           <p
             class="mt-1 text-sm text-slate-400"
           >
-            Try widening the Min / Max
-            ranges or removing a filter.
+            {{ lastSearchUsedFace
+              ? "No enrolled face profile matched this photo and the selected filters. Try another clear photo or search with clinical clues."
+              : "Try widening the Min / Max ranges or removing a filter." }}
           </p>
         </div>
 
@@ -732,17 +740,14 @@
                   <p
                     class="text-3xl font-black text-teal-700"
                   >
-                    {{
-                      scorePercent(
-                        candidate.score,
-                      )
-                    }}%
+                    <template v-if="candidate.faceDistance !== undefined && !candidate.score">Face clue</template>
+                    <template v-else>{{ scorePercent(candidate.score) }}%</template>
                   </p>
 
                   <p
                     class="text-[10px] font-bold uppercase text-slate-400"
                   >
-                    match score
+                    {{ candidate.faceDistance !== undefined ? "clinical evidence" : "match score" }}
                   </p>
                 </div>
 
@@ -941,6 +946,8 @@ import FormField
 
 import RangeField
   from "../components/forms/RangeField.vue";
+import FaceCapture from "../components/FaceCapture.vue";
+import { FACE_MODEL_ID } from "../services/faceRecognition";
 
 
 import {
@@ -1031,6 +1038,8 @@ interface BackendCandidate {
     | null;
 
   score: number;
+
+  faceDistance?: number;
 
   evidence:
     BackendEvidence[];
@@ -1269,6 +1278,11 @@ const loading =
 const error =
   ref("");
 
+const faceDescriptor = ref<number[] | null>(null);
+const faceProcessing = ref(false);
+const faceCaptureKey = ref(0);
+const lastSearchUsedFace = ref(false);
+
 
 const hasSearched =
   ref(false);
@@ -1471,14 +1485,10 @@ const sorted =
         }
 
 
-        return (
-          (Number(
-            b.score,
-          ) || 0) -
-          (Number(
-            a.score,
-          ) || 0)
-        );
+        if (a.faceDistance !== undefined && b.faceDistance !== undefined) {
+          return a.faceDistance - b.faceDistance || (Number(b.score) || 0) - (Number(a.score) || 0);
+        }
+        return (Number(b.score) || 0) - (Number(a.score) || 0);
       },
     );
   });
@@ -1512,6 +1522,7 @@ function handleProvinceChange() {
    ============================================================ */
 
 async function run() {
+  if (faceProcessing.value) return;
   error.value =
     "";
 
@@ -1824,6 +1835,11 @@ async function run() {
    * ----------------------------------------------------------
    */
 
+  if (faceDescriptor.value) {
+    searchCriteria.faceDescriptor = faceDescriptor.value;
+    searchCriteria.faceModelId = FACE_MODEL_ID;
+  }
+
   if (
     Object.keys(
       searchCriteria,
@@ -1850,6 +1866,8 @@ async function run() {
 
   loading.value =
     true;
+
+  lastSearchUsedFace.value = Boolean(faceDescriptor.value);
 
   hasSearched.value =
     true;
@@ -2005,6 +2023,7 @@ async function openDentalDetails(
     dentalDetailsLoading.value =
       false;
   }
+
 }
 
 
@@ -2124,6 +2143,10 @@ function formatDentalDate(
    ============================================================ */
 
 function clear() {
+  faceDescriptor.value = null;
+  faceProcessing.value = false;
+  lastSearchUsedFace.value = false;
+  faceCaptureKey.value += 1;
   Object.assign(
     f,
     {

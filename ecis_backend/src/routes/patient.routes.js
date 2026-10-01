@@ -19,6 +19,12 @@ const {
 
 const router = express.Router();
 
+const {
+  enrollFaceProfile,
+  removeFaceProfile,
+  getFaceProfileStatus,
+} = require("../controllers/faceProfile.controller");
+
 /*
  * All patient operations require
  * authenticated hospital staff.
@@ -55,6 +61,23 @@ router.post(
   "/:patientId/register-at-current-hospital",
   authorizeRoles("DOCTOR", "ADMIN"),
   registerPatientAtCurrentHospital,
+);
+
+/* Optional biometric clue. Only authorized staff may enroll or revoke it. */
+router.post(
+  "/:patientId/face-profile",
+  authorizeRoles("DOCTOR", "ADMIN"),
+  enrollFaceProfile,
+);
+router.get(
+  "/:patientId/face-profile",
+  authorizeRoles("DOCTOR", "ADMIN"),
+  getFaceProfileStatus,
+);
+router.delete(
+  "/:patientId/face-profile",
+  authorizeRoles("DOCTOR", "ADMIN"),
+  removeFaceProfile,
 );
 
 /* Patient 360 / longitudinal clinical context. */

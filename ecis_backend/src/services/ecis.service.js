@@ -751,6 +751,14 @@ async function searchPatients(
     );
   }
 
+  if (Array.isArray(searchInput?.facePatientIds)) {
+    const ids = searchInput.facePatientIds;
+    if (!ids.length || ids.length > 10 || ids.some((id) => !Number.isSafeInteger(id) || id <= 0)) {
+      throw new Error("Invalid face candidate set.");
+    }
+    addFilter("p.patient_id = ANY($VALUE::BIGINT[])", ids);
+  }
+
 
   /*
    * Clinical evidence filters
