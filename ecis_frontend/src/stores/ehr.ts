@@ -932,7 +932,7 @@ export function useEHR() {
       "id" |
         "patientNumber" |
         "createdAt"
-    >,
+    > & { photoBase64?: string | null },
   ) {
     const response =
       await apiPost<any>(
@@ -991,6 +991,10 @@ export function useEHR() {
 
           registrationNotes:
             data.registrationNotes ||
+            null,
+
+          photoBase64:
+            data.photoBase64 ||
             null,
 
           allergyStatus:

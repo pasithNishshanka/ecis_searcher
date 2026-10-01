@@ -660,21 +660,24 @@
 
 
         <!-- ERROR -->
-        <section v-if="canEnrollFace" class="space-y-3">
+        <section class="space-y-3">
           <FaceCapture
             :key="faceCaptureKey"
-            label="Optional face identity clue"
+            label="Registration photo (optional)"
+            registration-photo
+            :detect-face="canEnrollFace"
             @descriptor="faceDescriptor = $event"
             @photo="facePhoto = $event"
+            @photo-error="photoCaptureError = $event"
             @processing="faceProcessing = $event"
           />
-          <label v-if="faceDescriptor" class="flex items-start gap-2 text-sm text-slate-700">
+          <label v-if="canEnrollFace && faceDescriptor" class="flex items-start gap-2 text-sm text-slate-700">
             <input v-model="faceConsent" type="checkbox" class="mt-1 size-4 accent-teal-700" />
-            <span>I have recorded the patient's consent to save their registration photo and face clue for identity search.</span>
+            <span>I have recorded the patient's separate consent to use this photo for face identity search.</span>
           </label>
-          <div v-if="editing && faceEnrolled" class="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white p-3">
-            <span class="text-sm text-slate-700">A face profile is enrolled for this patient.</span>
-            <button type="button" class="text-sm font-semibold text-red-700 underline" :disabled="saving" @click="removeFaceProfile">Remove profile</button>
+          <div v-if="editing && canEnrollFace && faceEnrolled" class="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white p-3">
+            <span class="text-sm text-slate-700">A face-search clue is enrolled for this patient.</span>
+            <button type="button" class="text-sm font-semibold text-red-700 underline" :disabled="saving" @click="removeFaceProfile">Remove face clue</button>
           </div>
         </section>
 
@@ -793,7 +796,7 @@ import {
   useEHR,
 } from "../stores/ehr";
 
-import { apiDelete, apiGet, apiPost } from "../services/api";
+import { apiDelete, apiGet, apiPost, apiPut } from "../services/api";
 
 import {
   calculateAge,
@@ -913,6 +916,7 @@ const canEnrollFace = ["DOCTOR", "ADMIN"].includes(faceUserRole) ||
   (import.meta.env.DEV && faceUserRole === "SYSTEM_ADMIN");
 const faceDescriptor = ref<number[] | null>(null);
 const facePhoto = ref<string | null>(null);
+const photoCaptureError = ref<string | null>(null);
 const faceProcessing = ref(false);
 const faceConsent = ref(false);
 const faceCaptureKey = ref(0);
@@ -921,6 +925,7 @@ const faceEnrolled = ref(false);
 function resetFaceCapture() {
   faceDescriptor.value = null;
   facePhoto.value = null;
+  photoCaptureError.value = null;
   faceProcessing.value = false;
   faceConsent.value = false;
   faceCaptureKey.value += 1;
@@ -933,7 +938,9 @@ async function loadFaceStatus(patientId: string) {
     const response = await apiGet<{ data?: { enrolled?: boolean } }>(
       `/patients/${encodeURIComponent(patientId)}/face-profile`,
     );
-    if (editingId.value === patientId) faceEnrolled.value = Boolean(response.data?.enrolled);
+    if (editingId.value === patientId) {
+      faceEnrolled.value = Boolean(response.data?.enrolled);
+    }
   } catch {
     // Enrollment remains optional if status cannot be loaded.
   }
@@ -947,9 +954,10 @@ async function removeFaceProfile() {
     faceEnrolled.value = false;
     faceDescriptor.value = null;
     facePhoto.value = null;
+    photoCaptureError.value = null;
     faceConsent.value = false;
     faceCaptureKey.value += 1;
-    showToast("Face profile removed", "This patient will no longer appear in face-photo searches.", "success");
+    showToast("Face clue removed", "The separate registration photo remains on the EHR if one was saved.", "success");
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : "Unable to remove the face profile.";
   } finally {
@@ -1402,8 +1410,8 @@ async function savePatient() {
 
 
   try {
-    if (faceDescriptor.value && !faceConsent.value) {
-      throw new Error("Record patient consent before saving a registration photo and face clue.");
+    if (photoCaptureError.value) {
+      throw new Error(`The selected registration photo could not be saved: ${photoCaptureError.value}`);
     }
     if (faceDescriptor.value && !facePhoto.value) {
       throw new Error("The patient photo is not ready. Capture or choose it again.");
@@ -1577,6 +1585,8 @@ async function savePatient() {
       const savedPatient = await addPatient({
         ...form,
 
+        photoBase64: facePhoto.value,
+
         allergies: [
           ...form.foodAllergies,
           ...form.medicalAllergies,
@@ -1585,8 +1595,17 @@ async function savePatient() {
       savedPatientId = savedPatient.id;
     }
 
-    let enrollmentError = "";
-    if (faceDescriptor.value) {
+    const attachmentErrors: string[] = [];
+    if (wasEditing && facePhoto.value) {
+      try {
+        await apiPut(`/patients/${encodeURIComponent(savedPatientId)}/identity-photo`, {
+          photoBase64: facePhoto.value,
+        });
+      } catch (cause) {
+        attachmentErrors.push(cause instanceof Error ? cause.message : "Unable to save registration photo.");
+      }
+    }
+    if (faceDescriptor.value && faceConsent.value) {
       try {
         await apiPost(`/patients/${encodeURIComponent(savedPatientId)}/face-profile`, {
           descriptor: faceDescriptor.value,
@@ -1595,7 +1614,7 @@ async function savePatient() {
           consent: faceConsent.value,
         });
       } catch (cause) {
-        enrollmentError = cause instanceof Error ? cause.message : "Unable to enroll face profile.";
+        attachmentErrors.push(cause instanceof Error ? cause.message : "Unable to enroll face profile.");
       }
     }
 
@@ -1611,8 +1630,8 @@ async function savePatient() {
 
     resetForm();
 
-    if (enrollmentError) {
-      showToast("Patient saved; face profile not enrolled", enrollmentError, "error");
+    if (attachmentErrors.length) {
+      showToast("Patient saved; photo or face clue needs attention", attachmentErrors.join(" "), "error");
     } else {
       showToast(
         wasEditing ? "Patient updated" : "Patient registered",

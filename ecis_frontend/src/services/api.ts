@@ -64,6 +64,19 @@ function getRefreshToken(): string | null {
   );
 }
 
+function accessTokenNeedsRefresh(token: string): boolean {
+  try {
+    const segment = token.split(".")[1];
+    if (!segment) return false;
+    const base64 = segment.replace(/-/g, "+").replace(/_/g, "/");
+    const payload = JSON.parse(atob(base64.padEnd(Math.ceil(base64.length / 4) * 4, "=")));
+    return typeof payload.exp === "number" && payload.exp * 1000 <= Date.now() + 30_000;
+  } catch {
+    // The backend remains the authority for malformed or invalid tokens.
+    return false;
+  }
+}
+
 
 function getActiveHospitalContext(): { hospitalId: number; assignmentId: number | null } | null {
   try {
@@ -246,6 +259,19 @@ async function getNewAccessToken(): Promise<
   return refreshPromise;
 }
 
+async function accessTokenForRequest(endpoint: string): Promise<string | null> {
+  const token = getAccessToken();
+  if (endpoint.startsWith("/auth/login") || endpoint.startsWith("/auth/refresh")) return token;
+  if ((token && accessTokenNeedsRefresh(token)) || (!token && getRefreshToken())) {
+    const freshToken = await getNewAccessToken();
+    if (freshToken) return freshToken;
+    clearAuthentication();
+    redirectToLogin();
+    throw new Error("Your session has expired. Please sign in again before saving patient information.");
+  }
+  return token;
+}
+
 
 /* ============================================================
    RESTORE SESSION
@@ -255,7 +281,7 @@ export async function restoreSession(): Promise<boolean> {
   const accessToken =
     getAccessToken();
 
-  if (accessToken) {
+  if (accessToken && !accessTokenNeedsRefresh(accessToken)) {
     return true;
   }
 
@@ -263,12 +289,14 @@ export async function restoreSession(): Promise<boolean> {
     getRefreshToken();
 
   if (!refreshToken) {
+    if (accessToken) clearAuthentication();
     return false;
   }
 
   const token =
     await getNewAccessToken();
 
+  if (!token) clearAuthentication();
   return Boolean(token);
 }
 
@@ -364,7 +392,7 @@ export async function apiRequest<T>(
   options: RequestInit = {},
 ): Promise<T> {
   let token =
-    getAccessToken();
+    await accessTokenForRequest(endpoint);
 
   let result =
     await request(
@@ -601,7 +629,7 @@ async function binaryRequest(
 export async function apiGetBlob(
   endpoint: string,
 ): Promise<Blob> {
-  let token = getAccessToken();
+  let token = await accessTokenForRequest(endpoint);
 
   let response =
     await binaryRequest(

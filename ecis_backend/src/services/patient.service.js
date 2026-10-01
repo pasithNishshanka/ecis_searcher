@@ -1,5 +1,7 @@
 const pool =
   require("../config/database");
+const patientPhotos =
+  require("./patientPhoto.service");
 
 const {
   isValidProvinceDistrict,
@@ -597,6 +599,14 @@ async function createPatient(
       data.medicalAllergies,
     );
 
+  const hasRegistrationPhoto =
+    data.photoBase64 !== undefined &&
+    data.photoBase64 !== null;
+  if (hasRegistrationPhoto) {
+    patientPhotos.validatePhoto(data.photoBase64);
+    await patientPhotos.ensureSchema();
+  }
+
 
   const client =
     await pool.connect();
@@ -831,6 +841,15 @@ async function createPatient(
       allergyData.medical,
       "MEDICAL_DRUG",
     );
+
+    if (hasRegistrationPhoto) {
+      await patientPhotos.saveWithinTransaction(client, {
+        patientId,
+        hospitalId,
+        userId: Number(data.registeredBy),
+        photoBase64: data.photoBase64,
+      });
+    }
 
 
     await client.query(

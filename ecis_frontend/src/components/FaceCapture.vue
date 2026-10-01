@@ -1,7 +1,7 @@
 <template>
   <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
     <p class="text-sm font-bold text-slate-800">{{ label }}</p>
-    <p class="mt-1 text-xs text-slate-500">Use one clear face. With recorded consent, the photo and face clue are saved securely with the patient record.</p>
+    <p class="mt-1 text-xs text-slate-500">{{ registrationPhoto ? "Choose a clear patient photo to save with the EHR. Face matching, when available, requires separate consent." : "Use one clear face. This search photo is processed on this device and is not saved." }}</p>
     <div class="mt-3 flex flex-wrap gap-2">
       <label class="cursor-pointer rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
         Choose photo
@@ -9,15 +9,16 @@
       </label>
       <button v-if="!cameraOn" type="button" class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700" @click="startCamera">Use camera</button>
       <button v-else type="button" class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700" @click="stopCamera">Stop camera</button>
-      <button v-if="descriptorReady" type="button" class="text-sm font-semibold text-slate-600 underline" @click="clear">Clear</button>
+      <button v-if="previewUrl" type="button" class="text-sm font-semibold text-slate-600 underline" @click="clear">Clear</button>
     </div>
     <div v-if="cameraOn" class="mt-3">
       <video ref="video" autoplay playsinline muted class="max-h-72 w-full rounded-lg bg-black object-contain"></video>
       <button type="button" class="mt-2 rounded-lg bg-teal-700 px-3 py-2 text-sm font-semibold text-white" @click="capture">Capture face</button>
     </div>
     <img v-if="previewUrl" :src="previewUrl" alt="Selected face photo preview" class="mt-3 max-h-56 w-full rounded-lg object-contain" />
-    <p v-if="processing" class="mt-2 text-sm text-slate-600">Processing face locally…</p>
+    <p v-if="processing" class="mt-2 text-sm text-slate-600">Processing photo locally…</p>
     <p v-else-if="descriptorReady" class="mt-2 text-sm font-semibold text-teal-700">Face clue ready</p>
+    <p v-else-if="photoReady && registrationPhoto" class="mt-2 text-sm font-semibold text-teal-700">Patient photo ready to save</p>
     <p v-if="error" class="mt-2 text-sm text-red-700" role="alert">{{ error }}</p>
   </div>
 </template>
@@ -26,16 +27,21 @@
 import { nextTick, onBeforeUnmount, ref } from "vue";
 import { descriptorFromImage } from "../services/faceRecognition";
 
-defineProps<{ label: string }>();
+const props = withDefaults(defineProps<{ label: string; registrationPhoto?: boolean; detectFace?: boolean }>(), {
+  registrationPhoto: false,
+  detectFace: true,
+});
 const emit = defineEmits<{
   descriptor: [value: number[] | null];
   photo: [value: string | null];
+  photoError: [value: string | null];
   processing: [value: boolean];
 }>();
 const video = ref<HTMLVideoElement | null>(null);
 const cameraOn = ref(false);
 const processing = ref(false);
 const descriptorReady = ref(false);
+const photoReady = ref(false);
 const error = ref("");
 const previewUrl = ref("");
 let stream: MediaStream | null = null;
@@ -47,9 +53,11 @@ function clear() {
   if (previewUrl.value) URL.revokeObjectURL(previewUrl.value);
   previewUrl.value = "";
   descriptorReady.value = false;
+  photoReady.value = false;
   error.value = "";
   emit("descriptor", null);
   emit("photo", null);
+  emit("photoError", null);
 }
 
 async function photoForStorage(blob: Blob): Promise<string> {
@@ -86,15 +94,24 @@ async function process(blob: Blob) {
   processing.value = true;
   emit("processing", true);
   try {
-    const [descriptor, photo] = await Promise.all([descriptorFromImage(blob), photoForStorage(blob)]);
+    const photo = await photoForStorage(blob);
     if (attempt === generation) {
-      emit("descriptor", descriptor);
       emit("photo", photo);
-      descriptorReady.value = true;
+      photoReady.value = true;
+    }
+    if (props.detectFace) {
+      const descriptor = await descriptorFromImage(blob);
+      if (attempt === generation) {
+        emit("descriptor", descriptor);
+        descriptorReady.value = true;
+      }
     }
   } catch (cause) {
     if (attempt === generation) {
-      error.value = cause instanceof Error ? cause.message : "Unable to process the face photo.";
+      error.value = photoReady.value && props.registrationPhoto
+        ? "The photo is ready for the EHR, but the optional face clue could not be prepared."
+        : cause instanceof Error ? cause.message : "Unable to process the face photo.";
+      if (!photoReady.value && props.registrationPhoto) emit("photoError", error.value);
     }
   } finally {
     if (attempt === generation) {
@@ -126,6 +143,7 @@ async function startCamera() {
     if (video.value) video.value.srcObject = stream;
   } catch {
     error.value = "Camera access is unavailable. Choose a photo instead.";
+    if (props.registrationPhoto) emit("photoError", error.value);
     stopCamera();
   }
 }
@@ -140,6 +158,7 @@ function stopCamera() {
 async function capture() {
   if (!video.value || !video.value.videoWidth || !video.value.videoHeight) {
     error.value = "Camera is not ready yet.";
+    if (props.registrationPhoto) emit("photoError", error.value);
     return;
   }
   const canvas = document.createElement("canvas");

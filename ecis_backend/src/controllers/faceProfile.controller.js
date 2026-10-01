@@ -1,4 +1,5 @@
 const faceProfiles = require("../services/faceProfile.service");
+const patientPhotos = require("../services/patientPhoto.service");
 
 function context(req) {
   const patientId = Number(req.params.patientId);
@@ -33,13 +34,27 @@ async function enrollFaceProfile(req, res, next) {
 
 async function getIdentityPhoto(req, res, next) {
   try {
-    const photo = await faceProfiles.getPhoto(context(req));
+    const scope = context(req);
+    const photo = await patientPhotos.getPhoto(scope) || await faceProfiles.getPhoto(scope);
     res.set("Cache-Control", "private, no-store");
     res.set("X-Content-Type-Options", "nosniff");
     if (!photo) {
       return res.status(204).end();
     }
     res.type("image/jpeg").status(200).send(photo);
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function saveIdentityPhoto(req, res, next) {
+  try {
+    const result = await patientPhotos.save({
+      ...context(req),
+      photoBase64: req.body?.photoBase64,
+    });
+    res.set("Cache-Control", "private, no-store");
+    res.status(200).json({ success: true, message: result.replaced ? "Patient photo replaced." : "Patient photo saved." });
   } catch (error) {
     next(error);
   }
@@ -66,4 +81,4 @@ async function getFaceProfileStatus(req, res, next) {
   }
 }
 
-module.exports = { enrollFaceProfile, removeFaceProfile, getFaceProfileStatus, getIdentityPhoto };
+module.exports = { enrollFaceProfile, removeFaceProfile, getFaceProfileStatus, getIdentityPhoto, saveIdentityPhoto };
