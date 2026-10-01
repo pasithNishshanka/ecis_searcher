@@ -141,6 +141,7 @@ function authenticatedUserResponse(user, assignment, assignments) {
     hospitalName: assignment.hospital_name,
     assignmentId: assignment.assignment_id,
     employeeNumber: user.employee_number,
+    internalClinicianId: user.internal_clinician_id,
     fullName: user.full_name,
     username: user.username,
     role: assignment.role,
@@ -164,6 +165,7 @@ async function findActiveUserByIdentifier(username) {
       SELECT
         user_id,
         employee_number,
+        internal_clinician_id,
         full_name,
         username,
         password_hash,
@@ -204,6 +206,7 @@ async function findActiveUserById(userId) {
       SELECT
         user_id,
         employee_number,
+        internal_clinician_id,
         full_name,
         username,
         role,

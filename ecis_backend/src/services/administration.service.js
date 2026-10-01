@@ -16,6 +16,19 @@ const ASSIGNABLE_ROLES = new Set([
   "ECIS_SEARCHER",
   "SYSTEM_ADMIN",
 ]);
+const CLINICAL_ROLES = new Set(["DOCTOR", "NURSE", "SURGEON", "RADIOLOGIST", "LAB_TECHNICIAN", "PHARMACIST"]);
+
+async function allocateInternalClinicianId(client) {
+  await client.query("SELECT pg_advisory_xact_lock(hashtext('ecis:clinician-id'));");
+  const result = await client.query(
+    `
+      SELECT COALESCE(MAX(SUBSTRING(internal_clinician_id FROM '^ECIS-CLIN-([0-9]+)$')::bigint), 0) + 1 AS next_clinician_number
+      FROM public.hospital_users
+      WHERE internal_clinician_id ~ '^ECIS-CLIN-[0-9]+$';
+    `,
+  );
+  return `ECIS-CLIN-${String(result.rows[0].next_clinician_number).padStart(4, "0")}`;
+}
 
 function optionalText(value, fieldName, maxLength) {
   if (value === undefined || value === null || value === "") {
@@ -250,6 +263,7 @@ async function searchStaff(query) {
       SELECT
         u.user_id,
         u.employee_number,
+        u.internal_clinician_id,
         u.full_name,
         u.username,
         u.role AS account_role,
@@ -263,6 +277,7 @@ async function searchStaff(query) {
         u.is_active = TRUE
         AND (
           u.employee_number ILIKE $1 ESCAPE '\\'
+          OR u.internal_clinician_id ILIKE $1 ESCAPE '\\'
           OR u.full_name ILIKE $1 ESCAPE '\\'
           OR u.username ILIKE $1 ESCAPE '\\'
         )
@@ -275,6 +290,7 @@ async function searchStaff(query) {
   return result.rows.map((row) => ({
     userId: Number(row.user_id),
     employeeNumber: row.employee_number,
+    internalClinicianId: row.internal_clinician_id,
     fullName: row.full_name,
     username: row.username,
     accountRole: row.account_role,
@@ -288,6 +304,7 @@ function staffResponse(row) {
   return {
     userId: Number(row.user_id),
     employeeNumber: row.employee_number,
+    internalClinicianId: row.internal_clinician_id,
     fullName: row.full_name,
     username: row.username,
     accountRole: row.account_role,
@@ -371,6 +388,9 @@ async function createStaffAccount({ actor, input }) {
       `,
     );
     const employeeNumber = `EMP-${String(numberResult.rows[0].next_number).padStart(6, "0")}`;
+    const internalClinicianId = CLINICAL_ROLES.has(role)
+      ? await allocateInternalClinicianId(client)
+      : null;
 
     const passwordHash = await bcrypt.hash(password, 12);
     const userResult = await client.query(
@@ -385,12 +405,13 @@ async function createStaffAccount({ actor, input }) {
           department,
           phone,
           email,
+          internal_clinician_id,
           is_active,
           created_at,
           updated_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-        RETURNING user_id, employee_number, full_name, username, role, department, hospital_id;
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        RETURNING user_id, employee_number, internal_clinician_id, full_name, username, role, department, hospital_id;
       `,
       [
         hospitalId,
@@ -402,6 +423,7 @@ async function createStaffAccount({ actor, input }) {
         department,
         phone,
         email,
+        internalClinicianId,
       ],
     );
 
@@ -437,10 +459,13 @@ async function createStaffAccount({ actor, input }) {
     return {
       userId: Number(user.user_id),
       employeeNumber: user.employee_number,
+      internalClinicianId: user.internal_clinician_id,
       fullName: user.full_name,
       username: user.username,
       accountRole: user.role,
       accountDepartment: user.department,
+      designation,
+      licenseNumber,
       homeHospitalId: Number(user.hospital_id),
       homeHospitalName: hospitalResult.rows[0].hospital_name,
     };
@@ -496,10 +521,10 @@ async function createOrUpdateAssignment({ actor, input }) {
     const [userResult, hospitalResult] = await Promise.all([
       client.query(
         `
-          SELECT user_id
+          SELECT user_id, internal_clinician_id
           FROM public.hospital_users
           WHERE user_id = $1 AND is_active = TRUE
-          FOR KEY SHARE;
+          FOR UPDATE;
         `,
         [userId],
       ),
@@ -520,6 +545,15 @@ async function createOrUpdateAssignment({ actor, input }) {
 
     if (hospitalResult.rowCount === 0) {
       throw new Error("The selected hospital is inactive or does not exist.");
+    }
+
+    let internalClinicianId = userResult.rows[0].internal_clinician_id;
+    if (CLINICAL_ROLES.has(role) && !internalClinicianId) {
+      internalClinicianId = await allocateInternalClinicianId(client);
+      await client.query(
+        "UPDATE public.hospital_users SET internal_clinician_id = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2;",
+        [internalClinicianId, userId],
+      );
     }
 
     const existingResult = await client.query(
@@ -592,6 +626,7 @@ async function createOrUpdateAssignment({ actor, input }) {
       department: assignment.department,
       designation: assignment.designation,
       licenseNumber: assignment.license_number,
+      internalClinicianId,
       startDate: assignment.start_date,
       endDate: assignment.end_date,
       status: assignment.status,

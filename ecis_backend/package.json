@@ -7,6 +7,7 @@
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
     "provision:system-admin": "node scripts/provisionSystemAdmin.js",
+    "migrate:clinician-ids": "node scripts/migrateInternalClinicianIds.js",
     "audit:workflow": "node scripts/auditClinicalWorkflow.js",
     "seed:synthetic-training": "node scripts/seedSyntheticSriLankaDataset.js --execute"
   },
