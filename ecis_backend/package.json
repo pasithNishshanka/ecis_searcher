@@ -6,6 +6,10 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
+    "db:check": "node scripts/setupDatabase.js",
+    "db:setup": "node scripts/setupDatabase.js --apply",
+    "db:verify-bootstrap": "node scripts/verifyDatabaseBootstrap.js",
+    "bootstrap:hospital": "node scripts/bootstrapHospital.js",
     "provision:system-admin": "node scripts/provisionSystemAdmin.js",
     "migrate:clinician-ids": "node scripts/migrateInternalClinicianIds.js",
     "audit:workflow": "node scripts/auditClinicalWorkflow.js",
