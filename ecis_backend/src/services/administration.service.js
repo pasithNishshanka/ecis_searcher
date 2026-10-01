@@ -1,6 +1,7 @@
 const bcrypt = require("bcryptjs");
 
 const pool = require("../config/database");
+const { isValidProvinceDistrict } = require("../config/sriLankaLocations");
 
 const ASSIGNABLE_ROLES = new Set([
   "ADMIN",
@@ -104,6 +105,28 @@ function hospitalResponse(row) {
   };
 }
 
+function hospitalCodeStem(hospitalName) {
+  const words = hospitalName.normalize("NFKD").match(/[A-Za-z0-9]+/g) || [];
+  const meaningfulWords = words.filter((word) => !["AND", "FOR", "OF", "THE"].includes(word.toUpperCase()));
+  const codeWords = meaningfulWords.length ? meaningfulWords : words;
+
+  if (codeWords.length) {
+    return (codeWords.length === 1 ? codeWords[0] : codeWords.map((word) => word[0]).join(""))
+      .toUpperCase()
+      .slice(0, 12);
+  }
+
+  const localLetters = Array.from(hospitalName.normalize("NFC"))
+    .filter((character) => /[\p{L}\p{N}]/u.test(character))
+    .slice(0, 2);
+
+  if (!localLetters.length) {
+    throw new Error("hospitalName must contain letters or numbers to generate a code.");
+  }
+
+  return `H${localLetters.map((character) => character.codePointAt(0).toString(16).toUpperCase()).join("")}`.slice(0, 12);
+}
+
 async function listHospitals() {
   const result = await pool.query(
     `
@@ -127,11 +150,45 @@ async function listHospitals() {
 }
 
 async function createHospital(input) {
-  const hospitalCode = requiredText(input.hospitalCode, "hospitalCode", 50).toUpperCase();
-  const hospitalName = requiredText(input.hospitalName, "hospitalName", 200);
+  const hospitalName = requiredText(input.hospitalName, "hospitalName", 150).replace(/\s+/g, " ");
+  const codeStem = hospitalCodeStem(hospitalName);
+  const province = optionalText(input.province, "province", 100);
+  const district = optionalText(input.district, "district", 100);
 
-  const result = await pool.query(
-    `
+  if ((province || district) && !isValidProvinceDistrict(province, district)) {
+    throw new Error("province and district must be a valid Sri Lankan location pair.");
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock(hashtext('ecis:hospital-code'));");
+
+    const duplicateResult = await client.query(
+      "SELECT hospital_id FROM public.hospitals WHERE LOWER(hospital_name) = LOWER($1) LIMIT 1;",
+      [hospitalName],
+    );
+
+    if (duplicateResult.rowCount > 0) {
+      throw new Error("A hospital already uses this name.");
+    }
+
+    const existingCodes = await client.query(
+      "SELECT hospital_code FROM public.hospitals WHERE hospital_code = $1 OR LEFT(hospital_code, LENGTH($1) + 1) = $1 || '-';",
+      [codeStem],
+    );
+    const usedCodes = new Set(existingCodes.rows.map((row) => row.hospital_code));
+    let hospitalCode = codeStem;
+    let suffix = 2;
+
+    while (usedCodes.has(hospitalCode)) {
+      hospitalCode = `${codeStem}-${suffix}`;
+      suffix += 1;
+    }
+
+    const result = await client.query(
+      `
       INSERT INTO public.hospitals (
         hospital_code,
         hospital_name,
@@ -157,20 +214,27 @@ async function createHospital(input) {
         phone,
         email,
         is_active;
-    `,
-    [
-      hospitalCode,
-      hospitalName,
-      optionalText(input.hospitalType, "hospitalType", 100),
-      optionalText(input.province, "province", 100),
-      optionalText(input.district, "district", 100),
-      optionalText(input.address, "address", 1000),
-      optionalText(input.phone, "phone", 50),
-      optionalText(input.email, "email", 254),
-    ],
-  );
+      `,
+      [
+        hospitalCode,
+        hospitalName,
+        optionalText(input.hospitalType, "hospitalType", 100),
+        province,
+        district,
+        optionalText(input.address, "address", 1000),
+        optionalText(input.phone, "phone", 50),
+        optionalText(input.email, "email", 254),
+      ],
+    );
 
-  return hospitalResponse(result.rows[0]);
+    await client.query("COMMIT");
+    return hospitalResponse(result.rows[0]);
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 async function searchStaff(query) {
@@ -246,7 +310,6 @@ async function createStaffAccount({ actor, input }) {
   if (role === "SYSTEM_ADMIN") {
     throw new Error("System administrator accounts must be provisioned separately.");
   }
-  const employeeNumber = requiredText(input.employeeNumber, "employeeNumber", 100);
   const fullName = requiredText(input.fullName, "fullName", 200);
   const username = requiredText(input.username, "username", 100).toLowerCase();
   const password = requiredText(input.password, "password", 200);
@@ -287,16 +350,27 @@ async function createStaffAccount({ actor, input }) {
       `
         SELECT user_id
         FROM public.hospital_users
-        WHERE LOWER(username) = $1 OR employee_number = $2
+        WHERE LOWER(username) = $1
         LIMIT 1
         FOR KEY SHARE;
       `,
-      [username, employeeNumber],
+      [username],
     );
 
     if (duplicateResult.rowCount > 0) {
-      throw new Error("A staff account already uses this username or employee number.");
+      throw new Error("A staff account already uses this username.");
     }
+
+    // Serialize number allocation across requests, including requests for different hospitals.
+    await client.query("SELECT pg_advisory_xact_lock(hashtext('ecis:employee-number'));");
+    const numberResult = await client.query(
+      `
+        SELECT COALESCE(MAX(SUBSTRING(employee_number FROM '^EMP-([0-9]+)$')::bigint), 0) + 1 AS next_number
+        FROM public.hospital_users
+        WHERE employee_number ~ '^EMP-[0-9]+$';
+      `,
+    );
+    const employeeNumber = `EMP-${String(numberResult.rows[0].next_number).padStart(6, "0")}`;
 
     const passwordHash = await bcrypt.hash(password, 12);
     const userResult = await client.query(

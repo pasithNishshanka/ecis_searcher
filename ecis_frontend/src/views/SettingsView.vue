@@ -119,10 +119,6 @@
               </select>
             </label>
             <label class="label">
-              Employee number
-              <input v-model.trim="staffAccountForm.employeeNumber" class="field mt-1" placeholder="e.g. DOC-102" required>
-            </label>
-            <label class="label">
               Full name
               <input v-model.trim="staffAccountForm.fullName" class="field mt-1" placeholder="Clinician's full name" required>
             </label>
@@ -136,7 +132,10 @@
             </label>
             <label class="label">
               Department
-              <input v-model.trim="staffAccountForm.department" class="field mt-1" placeholder="e.g. OPD">
+              <select v-model="staffAccountForm.department" class="field mt-1" required>
+                <option value="">Select department</option>
+                <option v-for="department in departmentOptions" :key="department" :value="department">{{ department }}</option>
+              </select>
             </label>
             <label class="label">
               Designation
@@ -144,7 +143,7 @@
             </label>
             <label class="label">
               Professional license
-              <input v-model.trim="staffAccountForm.licenseNumber" class="field mt-1" placeholder="Optional">
+              <input v-model.trim="staffAccountForm.licenseNumber" class="field mt-1" placeholder="e.g. SLMC 12345 (if verified)">
             </label>
             <label class="label">
               Phone
@@ -156,7 +155,8 @@
             </label>
           </div>
 
-          <BaseButton class="mt-5" type="submit" :loading="staffAccountSaving" :disabled="!staffAccountForm.hospitalId || !staffAccountForm.employeeNumber || !staffAccountForm.fullName || !staffAccountForm.username || staffAccountForm.password.length < 12">
+          <p class="mt-3 text-xs text-slate-500">The system assigns an employee number when the account is created. Enter a professional license only if it belongs to this staff member.</p>
+          <BaseButton class="mt-5" type="submit" :loading="staffAccountSaving" :disabled="!staffAccountForm.hospitalId || !staffAccountForm.department || !staffAccountForm.fullName || !staffAccountForm.username || staffAccountForm.password.length < 12">
             Create staff login
           </BaseButton>
         </form>
@@ -209,7 +209,11 @@
             </label>
             <label class="label">
               Department
-              <input v-model.trim="assignmentForm.department" class="field mt-1" placeholder="e.g. OPD">
+              <select v-model="assignmentForm.department" class="field mt-1">
+                <option value="">Select department</option>
+                <option v-if="assignmentForm.department && !departmentOptions.includes(assignmentForm.department)" :value="assignmentForm.department">{{ assignmentForm.department }} (existing)</option>
+                <option v-for="department in departmentOptions" :key="department" :value="department">{{ department }}</option>
+              </select>
             </label>
             <label class="label">
               Designation
@@ -251,11 +255,17 @@
           </label>
           <label class="label">
             Province
-            <input v-model.trim="hospitalForm.province" class="field mt-1" placeholder="Western Province">
+            <select v-model="hospitalForm.province" class="field mt-1" required @change="hospitalForm.district = ''">
+              <option value="">Select province</option>
+              <option v-for="province in SRI_LANKAN_PROVINCES" :key="province" :value="province">{{ province }}</option>
+            </select>
           </label>
           <label class="label">
             District
-            <input v-model.trim="hospitalForm.district" class="field mt-1" placeholder="Colombo">
+            <select v-model="hospitalForm.district" class="field mt-1" :disabled="!hospitalForm.province" required>
+              <option value="">Select district</option>
+              <option v-for="district in hospitalDistricts" :key="district" :value="district">{{ district }}</option>
+            </select>
           </label>
           <label class="label">
             Phone
@@ -271,7 +281,7 @@
           </label>
         </div>
 
-        <BaseButton class="mt-5" type="submit" :loading="hospitalSaving" :disabled="!hospitalForm.hospitalCode || !hospitalForm.hospitalName">
+        <BaseButton class="mt-5" type="submit" :loading="hospitalSaving" :disabled="!hospitalForm.hospitalCode || !hospitalForm.hospitalName || !hospitalForm.province || !hospitalForm.district">
           Create hospital
         </BaseButton>
       </form>
@@ -285,6 +295,7 @@ import { computed, onMounted, ref } from "vue";
 import PageHeader from "../components/PageHeader.vue";
 import BaseButton from "../components/ui/BaseButton.vue";
 import { apiGet, apiPost, switchHospitalContext } from "../services/api";
+import { SRI_LANKA_LOCATIONS, SRI_LANKAN_PROVINCES } from "../utils/sriLankaLocations";
 
 type HospitalAssignment = {
   assignmentId: number;
@@ -337,6 +348,11 @@ type Staff = {
 type DataResponse<T> = { data?: T };
 
 const assignmentRoles = ["ADMIN", "HOSPITAL_ADMIN", "DOCTOR", "NURSE", "SURGEON", "RADIOLOGIST", "LAB_TECHNICIAN", "PHARMACIST", "RECEPTIONIST", "ECIS_SEARCHER"];
+const departmentOptions = [
+  "Administration", "OPD", "Clinics", "Emergency Department", "Medical Ward", "Surgical Ward",
+  "Intensive Care Unit", "Laboratory", "Radiology / Imaging", "Pharmacy", "Operating Theatre",
+  "Dental", "Medical Records", "Records Integration",
+];
 const today = new Date().toISOString().slice(0, 10);
 const context = ref<UserContext | null>(null);
 const selectedAssignmentId = ref<number | null>(null);
@@ -378,7 +394,6 @@ const hospitalForm = ref({
 const staffAccountForm = ref({
   hospitalId: null as number | null,
   role: "DOCTOR",
-  employeeNumber: "",
   fullName: "",
   username: "",
   password: "",
@@ -397,6 +412,7 @@ const canManageAssignments = computed(() => ["SYSTEM_ADMIN", "ADMIN", "HOSPITAL_
 const canCreateHospitals = computed(() => normalizedRole.value === "SYSTEM_ADMIN");
 const isHospitalAdministrator = computed(() => ["ADMIN", "HOSPITAL_ADMIN"].includes(normalizedRole.value));
 const canSwitch = computed(() => selectedAssignmentId.value !== null && selectedAssignmentId.value !== context.value?.assignmentId && !switching.value);
+const hospitalDistricts = computed(() => SRI_LANKA_LOCATIONS[hospitalForm.value.province] || []);
 
 function messageFrom(errorValue: unknown, fallback: string) {
   return errorValue instanceof Error ? errorValue.message : fallback;
@@ -486,14 +502,13 @@ async function createStaffAccount() {
       assignmentForm.value.hospitalId = staff.homeHospitalId;
       assignmentForm.value.role = staff.accountRole;
       assignmentForm.value.department = staff.accountDepartment || "";
-      success.value = `Created login for ${staff.fullName}. The clinician can now sign in with the credentials you provided.`;
+      success.value = `Created login for ${staff.fullName}. Employee number: ${staff.employeeNumber}. The staff member can now sign in with the credentials you provided.`;
     } else {
       success.value = "Staff login created.";
     }
     staffAccountForm.value = {
       hospitalId: context.value?.hospitalId || null,
       role: "DOCTOR",
-      employeeNumber: "",
       fullName: "",
       username: "",
       password: "",
