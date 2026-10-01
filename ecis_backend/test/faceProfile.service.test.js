@@ -24,9 +24,14 @@ test("face descriptors require the expected model and 128 finite values", () => 
 test("face enrollment encrypts the template and search returns only nearby candidates", async () => {
   process.env.ECIS_FACE_TEMPLATE_KEY = "a".repeat(64);
   const descriptor = Array(128).fill(0.01);
+  const photo = Buffer.from([0xff, 0xd8, ...Array(100).fill(0x41), 0xff, 0xd9]);
   let stored;
-  pool.query = async (sql) => {
-    if (String(sql).includes("CREATE TABLE")) return { rows: [], rowCount: 0 };
+  pool.query = async (sql, params) => {
+    if (String(sql).includes("CREATE TABLE") || String(sql).includes("ALTER TABLE")) return { rows: [], rowCount: 0 };
+    if (String(sql).includes("fp.photo_ciphertext")) {
+      if (params[1] !== 1) return { rows: [], rowCount: 0 };
+      return { rows: [{ patient_id: 42, photo_ciphertext: stored[7], photo_iv: stored[8], photo_tag: stored[9] }], rowCount: 1 };
+    }
     if (String(sql).includes("FROM public.patient_face_profiles fp")) {
       return { rows: [{ patient_id: 42, model_id: faceProfiles.MODEL_ID,
         descriptor_ciphertext: stored[4], descriptor_iv: stored[5], descriptor_tag: stored[6] }], rowCount: 1 };
@@ -50,8 +55,11 @@ test("face enrollment encrypts the template and search returns only nearby candi
   });
 
   await faceProfiles.enroll({ patientId: 42, hospitalId: 1, userId: 9,
-    descriptor, modelId: faceProfiles.MODEL_ID, consent: true });
+    descriptor, modelId: faceProfiles.MODEL_ID, photoBase64: photo.toString("base64"), consent: true });
   assert.equal(stored[4].includes(Buffer.from(JSON.stringify(descriptor))), false);
+  assert.equal(stored[7].includes(photo), false);
+  assert.deepEqual(await faceProfiles.getPhoto({ patientId: 42, hospitalId: 1 }), photo);
+  assert.equal(await faceProfiles.getPhoto({ patientId: 42, hospitalId: 2 }), null);
   assert.deepEqual(await faceProfiles.findMatches(descriptor, faceProfiles.MODEL_ID), [
     { patientId: 42, distance: 0 },
   ]);
@@ -61,5 +69,14 @@ test("face enrollment encrypts the template and search returns only nearby candi
 test("face enrollment requires explicit consent", async () => {
   process.env.ECIS_FACE_TEMPLATE_KEY = "a".repeat(64);
   await assert.rejects(faceProfiles.enroll({ patientId: 42, hospitalId: 1, userId: 9,
-    descriptor: Array(128).fill(0), modelId: faceProfiles.MODEL_ID, consent: false }), /consent/);
+    descriptor: Array(128).fill(0), modelId: faceProfiles.MODEL_ID,
+    photoBase64: Buffer.from([0xff, 0xd8, 0xff, 0xd9]).toString("base64"), consent: false }), /consent/);
+});
+
+test("registration photo input requires a canonical JPEG within the size limit", () => {
+  assert.throws(() => faceProfiles.validatePhoto("not-an-image"), /valid JPEG/);
+  assert.throws(() => faceProfiles.validatePhoto(Buffer.from("hello").toString("base64")), /must be a JPEG/);
+  assert.throws(() => faceProfiles.validatePhoto(Buffer.concat([
+    Buffer.from([0xff, 0xd8]), Buffer.alloc(1_000_000), Buffer.from([0xff, 0xd9]),
+  ]).toString("base64")), /under 1 MB/);
 });

@@ -1,7 +1,7 @@
 <template>
   <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
     <p class="text-sm font-bold text-slate-800">{{ label }}</p>
-    <p class="mt-1 text-xs text-slate-500">Use one clear face. The photo is processed on this device and is not uploaded.</p>
+    <p class="mt-1 text-xs text-slate-500">Use one clear face. With recorded consent, the photo and face clue are saved securely with the patient record.</p>
     <div class="mt-3 flex flex-wrap gap-2">
       <label class="cursor-pointer rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
         Choose photo
@@ -29,6 +29,7 @@ import { descriptorFromImage } from "../services/faceRecognition";
 defineProps<{ label: string }>();
 const emit = defineEmits<{
   descriptor: [value: number[] | null];
+  photo: [value: string | null];
   processing: [value: boolean];
 }>();
 const video = ref<HTMLVideoElement | null>(null);
@@ -48,6 +49,34 @@ function clear() {
   descriptorReady.value = false;
   error.value = "";
   emit("descriptor", null);
+  emit("photo", null);
+}
+
+async function photoForStorage(blob: Blob): Promise<string> {
+  const source = URL.createObjectURL(blob);
+  try {
+    const image = new Image();
+    image.src = source;
+    await image.decode();
+    const scale = Math.min(1, 720 / Math.max(image.naturalWidth, image.naturalHeight));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Unable to prepare the patient photo.");
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    const jpeg = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.82));
+    if (!jpeg || jpeg.size > 1_000_000) throw new Error("The patient photo is too large. Choose a smaller image.");
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(new Error("Unable to read the patient photo."));
+      reader.readAsDataURL(jpeg);
+    });
+    return dataUrl.split(",", 2)[1] || "";
+  } finally {
+    URL.revokeObjectURL(source);
+  }
 }
 
 async function process(blob: Blob) {
@@ -57,9 +86,10 @@ async function process(blob: Blob) {
   processing.value = true;
   emit("processing", true);
   try {
-    const descriptor = await descriptorFromImage(blob);
+    const [descriptor, photo] = await Promise.all([descriptorFromImage(blob), photoForStorage(blob)]);
     if (attempt === generation) {
       emit("descriptor", descriptor);
+      emit("photo", photo);
       descriptorReady.value = true;
     }
   } catch (cause) {
@@ -125,6 +155,7 @@ onBeforeUnmount(() => {
   generation += 1;
   stopCamera();
   if (previewUrl.value) URL.revokeObjectURL(previewUrl.value);
+  emit("photo", null);
   emit("processing", false);
 });
 </script>

@@ -18,6 +18,7 @@ async function enrollFaceProfile(req, res, next) {
     const result = await faceProfiles.enroll({
       ...context(req),
       descriptor: req.body?.descriptor,
+      photoBase64: req.body?.photoBase64,
       modelId: req.body?.modelId,
       consent: req.body?.consent,
     });
@@ -25,6 +26,20 @@ async function enrollFaceProfile(req, res, next) {
       success: true,
       message: result.replaced ? "Face profile updated." : "Face profile enrolled.",
     });
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function getIdentityPhoto(req, res, next) {
+  try {
+    const photo = await faceProfiles.getPhoto(context(req));
+    res.set("Cache-Control", "private, no-store");
+    res.set("X-Content-Type-Options", "nosniff");
+    if (!photo) {
+      return res.status(204).end();
+    }
+    res.type("image/jpeg").status(200).send(photo);
   } catch (error) {
     next(error);
   }
@@ -51,4 +66,4 @@ async function getFaceProfileStatus(req, res, next) {
   }
 }
 
-module.exports = { enrollFaceProfile, removeFaceProfile, getFaceProfileStatus };
+module.exports = { enrollFaceProfile, removeFaceProfile, getFaceProfileStatus, getIdentityPhoto };

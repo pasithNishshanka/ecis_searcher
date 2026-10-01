@@ -23,6 +23,7 @@ const {
   enrollFaceProfile,
   removeFaceProfile,
   getFaceProfileStatus,
+  getIdentityPhoto,
 } = require("../controllers/faceProfile.controller");
 
 /*
@@ -79,6 +80,9 @@ router.delete(
   authorizeRoles("DOCTOR", "ADMIN"),
   removeFaceProfile,
 );
+
+/* Registration photo is available only in the patient's authorized hospital context. */
+router.get("/:patientId/identity-photo", getIdentityPhoto);
 
 /* Patient 360 / longitudinal clinical context. */
 router.get(

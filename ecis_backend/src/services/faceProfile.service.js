@@ -20,10 +20,19 @@ function ensureSchema() {
           descriptor_ciphertext BYTEA NOT NULL,
           descriptor_iv BYTEA NOT NULL,
           descriptor_tag BYTEA NOT NULL,
+          photo_ciphertext BYTEA,
+          photo_iv BYTEA,
+          photo_tag BYTEA,
           consent_recorded_at TIMESTAMPTZ NOT NULL,
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
+      `);
+      await pool.query(`
+        ALTER TABLE public.patient_face_profiles
+          ADD COLUMN IF NOT EXISTS photo_ciphertext BYTEA,
+          ADD COLUMN IF NOT EXISTS photo_iv BYTEA,
+          ADD COLUMN IF NOT EXISTS photo_tag BYTEA
       `);
       await pool.query(`
         CREATE TABLE IF NOT EXISTS public.patient_face_profile_events (
@@ -86,6 +95,39 @@ function decrypt(row, key) {
   return validateDescriptor(descriptor, row.model_id);
 }
 
+function validatePhoto(photoBase64) {
+  if (typeof photoBase64 !== "string" || !/^[A-Za-z0-9+/]+={0,2}$/.test(photoBase64)) {
+    const error = new Error("A valid JPEG registration photo is required.");
+    error.statusCode = 400;
+    error.expose = true;
+    throw error;
+  }
+  const photo = Buffer.from(photoBase64, "base64");
+  if (photo.length < 4 || photo.length > 1_000_000 || photo.toString("base64") !== photoBase64 ||
+      photo[0] !== 0xff || photo[1] !== 0xd8 || photo[photo.length - 2] !== 0xff || photo[photo.length - 1] !== 0xd9) {
+    const error = new Error("The registration photo must be a JPEG under 1 MB.");
+    error.statusCode = 400;
+    error.expose = true;
+    throw error;
+  }
+  return photo;
+}
+
+function encryptPhoto(photo, patientId, key) {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  cipher.setAAD(Buffer.from(`${patientId}:identity-photo:v1`));
+  const ciphertext = Buffer.concat([cipher.update(photo), cipher.final()]);
+  return { ciphertext, iv, tag: cipher.getAuthTag() };
+}
+
+function decryptPhoto(row, key) {
+  const decipher = crypto.createDecipheriv("aes-256-gcm", key, row.photo_iv);
+  decipher.setAAD(Buffer.from(`${row.patient_id}:identity-photo:v1`));
+  decipher.setAuthTag(row.photo_tag);
+  return Buffer.concat([decipher.update(row.photo_ciphertext), decipher.final()]);
+}
+
 function distance(left, right) {
   let sum = 0;
   for (let index = 0; index < DESCRIPTOR_LENGTH; index += 1) {
@@ -94,9 +136,10 @@ function distance(left, right) {
   return Math.sqrt(sum);
 }
 
-async function enroll({ patientId, hospitalId, userId, descriptor, modelId, consent }) {
+async function enroll({ patientId, hospitalId, userId, descriptor, modelId, photoBase64, consent }) {
   const key = encryptionKey();
   validateDescriptor(descriptor, modelId);
+  const photo = validatePhoto(photoBase64);
   if (consent !== true) {
     const error = new Error("Documented patient consent is required for face enrollment.");
     error.statusCode = 400;
@@ -127,11 +170,12 @@ async function enroll({ patientId, hospitalId, userId, descriptor, modelId, cons
       "SELECT 1 FROM public.patient_face_profiles WHERE patient_id = $1", [patientId],
     );
     const { ciphertext, iv, tag } = encrypt(descriptor, patientId, key);
+    const encryptedPhoto = encryptPhoto(photo, patientId, key);
     await client.query(`
       INSERT INTO public.patient_face_profiles
         (patient_id, enrolled_hospital_id, enrolled_by, model_id, descriptor_ciphertext,
-         descriptor_iv, descriptor_tag, consent_recorded_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+         descriptor_iv, descriptor_tag, photo_ciphertext, photo_iv, photo_tag, consent_recorded_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
       ON CONFLICT (patient_id) DO UPDATE SET
         enrolled_hospital_id = EXCLUDED.enrolled_hospital_id,
         enrolled_by = EXCLUDED.enrolled_by,
@@ -139,8 +183,12 @@ async function enroll({ patientId, hospitalId, userId, descriptor, modelId, cons
         descriptor_ciphertext = EXCLUDED.descriptor_ciphertext,
         descriptor_iv = EXCLUDED.descriptor_iv,
         descriptor_tag = EXCLUDED.descriptor_tag,
+        photo_ciphertext = EXCLUDED.photo_ciphertext,
+        photo_iv = EXCLUDED.photo_iv,
+        photo_tag = EXCLUDED.photo_tag,
         consent_recorded_at = NOW(), updated_at = NOW()
-    `, [patientId, hospitalId, userId, MODEL_ID, ciphertext, iv, tag]);
+    `, [patientId, hospitalId, userId, MODEL_ID, ciphertext, iv, tag,
+      encryptedPhoto.ciphertext, encryptedPhoto.iv, encryptedPhoto.tag]);
     await client.query(`
       INSERT INTO public.patient_face_profile_events (patient_id, hospital_id, actor_user_id, event_type)
       VALUES ($1, $2, $3, $4)
@@ -153,6 +201,23 @@ async function enroll({ patientId, hospitalId, userId, descriptor, modelId, cons
   } finally {
     client.release();
   }
+}
+
+async function getPhoto({ patientId, hospitalId }) {
+  const key = encryptionKey();
+  await ensureSchema();
+  const result = await pool.query(`
+    SELECT fp.patient_id, fp.photo_ciphertext, fp.photo_iv, fp.photo_tag
+    FROM public.patient_face_profiles fp
+    JOIN public.patients p ON p.patient_id = fp.patient_id
+    WHERE fp.patient_id = $1 AND p.status = 'ACTIVE'
+      AND fp.photo_ciphertext IS NOT NULL
+      AND (p.hospital_id = $2 OR EXISTS (
+        SELECT 1 FROM public.patient_hospital_registrations phr
+        WHERE phr.patient_id = p.patient_id AND phr.hospital_id = $2 AND phr.status = 'ACTIVE'
+      ))
+  `, [patientId, hospitalId]);
+  return result.rowCount ? decryptPhoto(result.rows[0], key) : null;
 }
 
 async function remove({ patientId, hospitalId, userId }) {
@@ -222,4 +287,4 @@ async function findMatches(descriptor, modelId) {
   return matches.sort((a, b) => a.distance - b.distance).slice(0, 10);
 }
 
-module.exports = { MODEL_ID, MAX_DISTANCE, validateDescriptor, distance, enroll, remove, status, findMatches };
+module.exports = { MODEL_ID, MAX_DISTANCE, validateDescriptor, validatePhoto, distance, enroll, remove, status, getPhoto, findMatches };

@@ -32,14 +32,9 @@
 
         <div class="card p-5">
           <div class="flex gap-3">
-            <div class="avatar">
-              {{
-                patient.firstName?.[0] ||
-                ""
-              }}{{
-                patient.lastName?.[0] ||
-                ""
-              }}
+            <div class="flex size-20 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-teal-50 text-xl font-bold text-teal-900">
+              <img v-if="photoUrl" :src="photoUrl" :alt="`Registration photo of ${patient.firstName} ${patient.lastName}`" class="size-full object-cover" />
+              <template v-else>{{ patient.firstName?.[0] || "" }}{{ patient.lastName?.[0] || "" }}</template>
             </div>
 
             <div>
@@ -1357,6 +1352,7 @@ import {
   h,
   reactive,
   ref,
+  watch,
 } from "vue";
 
 import {
@@ -1390,6 +1386,7 @@ import AppToast
 
 import {
   apiGet,
+  apiGetBlob,
 } from "../services/api";
 
 import {
@@ -1458,6 +1455,31 @@ const patient =
       ),
     ),
   );
+
+const photoUrl = ref("");
+watch(() => patient.value?.id, async (id, _previousId, onCleanup) => {
+  let disposed = false;
+  let objectUrl = "";
+  onCleanup(() => {
+    disposed = true;
+    if (objectUrl) URL.revokeObjectURL(objectUrl);
+    if (photoUrl.value === objectUrl) photoUrl.value = "";
+  });
+  photoUrl.value = "";
+  if (!id) return;
+  try {
+    const photo = await apiGetBlob(`/patients/${encodeURIComponent(String(id))}/identity-photo`);
+    if (photo.type !== "image/jpeg") return;
+    objectUrl = URL.createObjectURL(photo);
+    if (disposed) {
+      URL.revokeObjectURL(objectUrl);
+      return;
+    }
+    photoUrl.value = objectUrl;
+  } catch {
+    // Patients enrolled before photo storage was added retain their initials avatar.
+  }
+}, { immediate: true });
 
 
 const records =
