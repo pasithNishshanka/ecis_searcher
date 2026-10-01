@@ -993,6 +993,9 @@ export function useEHR() {
             data.registrationNotes ||
             null,
 
+          allergyStatus:
+            data.allergyStatus,
+
           foodAllergies:
             data.foodAllergies ||
             [],
@@ -1077,6 +1080,9 @@ export function useEHR() {
 
           registrationNotes:
             data.registrationNotes,
+
+          allergyStatus:
+            data.allergyStatus,
 
           foodAllergies:
             data.foodAllergies,
