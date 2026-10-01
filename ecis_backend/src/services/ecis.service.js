@@ -406,6 +406,7 @@ function normalizeSearchInput(
 async function searchPatients(
   searchInput,
   hospitalIdValue,
+  options = {},
 ) {
   const hospitalId =
     positiveInteger(
@@ -417,6 +418,15 @@ async function searchPatients(
     normalizeSearchInput(
       searchInput || {},
     );
+
+  // Used only by the controller's server-computed face candidate search.
+  // Keep the clinical clues available for scoring, but do not require every
+  // clue to match before a face candidate can be reviewed.
+  const facePatientIds = options.facePatientIds ?? searchInput?.facePatientIds;
+  const relaxedFilters = options.relaxedFilters === true;
+  if (relaxedFilters && !Array.isArray(facePatientIds)) {
+    throw new Error("Relaxed ECIS search requires a face candidate set.");
+  }
 
 
   /*
@@ -441,11 +451,26 @@ async function searchPatients(
     `,
   ];
 
+  // A standalone search may show only patients registered at the active
+  // hospital. Cross-hospital candidates require a linked emergency case,
+  // whose search log is checked again before longitudinal evidence is read.
+  if (!options.allowCrossHospital) {
+    values.push(hospitalId);
+    where.push(`EXISTS (
+      SELECT 1 FROM public.patient_hospital_registrations phr
+      WHERE phr.patient_id = p.patient_id
+        AND phr.hospital_id = $${values.length}
+        AND phr.status = 'ACTIVE'
+    )`);
+  }
+
 
   function addFilter(
     sql,
     value,
+    force = false,
   ) {
+    if (relaxedFilters && !force) return;
     values.push(
       value,
     );
@@ -751,12 +776,12 @@ async function searchPatients(
     );
   }
 
-  if (Array.isArray(searchInput?.facePatientIds)) {
-    const ids = searchInput.facePatientIds;
+  if (Array.isArray(facePatientIds)) {
+    const ids = facePatientIds;
     if (!ids.length || ids.length > 10 || ids.some((id) => !Number.isSafeInteger(id) || id <= 0)) {
       throw new Error("Invalid face candidate set.");
     }
-    addFilter("p.patient_id = ANY($VALUE::BIGINT[])", ids);
+    addFilter("p.patient_id = ANY($VALUE::BIGINT[])", ids, true);
   }
 
 
@@ -849,7 +874,7 @@ async function searchPatients(
 
 
   if (
-    input.dental
+    input.dental && !relaxedFilters
   ) {
     const dentalTerms =
       input.dentalTerms.length
@@ -1368,9 +1393,7 @@ async function searchPatients(
       )}
 
     ORDER BY
-      p.patient_id DESC
-
-    LIMIT ${DEFAULT_LIMIT};
+      p.patient_id DESC;
   `;
 
 
@@ -2313,9 +2336,13 @@ async function searchPatients(
     },
 
     count:
+      Math.min(candidates.length, DEFAULT_LIMIT),
+
+    totalCandidates:
       candidates.length,
 
-    candidates,
+    candidates:
+      candidates.slice(0, DEFAULT_LIMIT),
   };
 }
 

@@ -249,6 +249,8 @@ async function searchPatients(req, res, next) {
     const hospitalId = getHospitalId(req);
 
     const searchTerm = String(req.query.q || "").trim();
+    const gender = String(req.query.gender || "").trim();
+    const page = req.query.page === undefined ? 1 : Number(req.query.page);
 
     if (!hospitalId) {
       return res.status(401).json({
@@ -257,22 +259,39 @@ async function searchPatients(req, res, next) {
       });
     }
 
-    if (!searchTerm) {
+    if (gender && !["Male", "Female", "Other"].includes(gender)) {
       return res.status(400).json({
         success: false,
-        message: "Search query is required.",
+        message: "Invalid gender filter.",
       });
     }
 
-    const patients = await patientService.searchPatients(
+    if (!searchTerm && !gender) {
+      return res.status(400).json({
+        success: false,
+        message: "A search query or gender filter is required.",
+      });
+    }
+
+    if (!Number.isSafeInteger(page) || page < 1) {
+      return res.status(400).json({ success: false, message: "Page must be a positive integer." });
+    }
+
+    const result = await patientService.searchPatients(
       hospitalId,
       searchTerm,
+      gender || null,
+      page,
     );
 
     return res.status(200).json({
       success: true,
-      count: patients.length,
-      data: patients,
+      count: result.rows.length,
+      total: result.total,
+      page: result.page,
+      pageSize: result.pageSize,
+      hasMore: result.page * result.pageSize < result.total,
+      data: result.rows,
     });
   } catch (error) {
     next(error);

@@ -96,6 +96,17 @@
               </div>
 
               <BaseButton
+                v-if="canCorrectDoctor && b.admissionId"
+                variant="secondary"
+                block
+                size="sm"
+                class="mt-2"
+                @click="openDoctorCorrection(b)"
+              >
+                Attending doctor
+              </BaseButton>
+
+              <BaseButton
                 v-if="b.admissionId"
                 variant="danger"
                 block
@@ -370,6 +381,43 @@
         </div>
       </div>
     </Modal>
+
+    <Modal
+      :open="!!doctorCorrectionTarget"
+      title="Attending doctor"
+      description="Link a verified, hospital-assigned doctor to an active admission when none is recorded. This correction is audited."
+      @close="closeDoctorCorrection"
+    >
+      <div v-if="doctorCorrectionTarget" class="space-y-4">
+        <p class="text-sm font-semibold">{{ doctorCorrectionTarget.admissionNumber || `Admission ${doctorCorrectionTarget.admissionId}` }}</p>
+        <p v-if="doctorCorrectionLoading" class="muted">Loading admission and assigned doctors...</p>
+        <template v-else-if="doctorCorrectionAdmission?.doctor_id">
+          <p class="rounded-xl bg-teal-50 p-3 text-sm text-teal-800">
+            Attending doctor already recorded: {{ doctorCorrectionAdmission.doctor_name }}. This workflow does not overwrite it.
+          </p>
+        </template>
+        <template v-else>
+          <FormField label="Verified attending doctor" required>
+            <BaseSelect v-model="correctionDoctorId" :disabled="doctorCorrectionSaving">
+              <option value="">Select a doctor assigned to this hospital</option>
+              <option v-for="doctor in correctionDoctors" :key="doctor.userId" :value="String(doctor.userId)">
+                {{ doctor.fullName }}{{ doctor.designation ? ` · ${doctor.designation}` : '' }}
+              </option>
+            </BaseSelect>
+          </FormField>
+          <p v-if="!correctionDoctors.length" class="text-sm text-amber-800">
+            No authorized doctor is assigned here. Create and assign the verified staff account in Settings first.
+          </p>
+          <FormField label="Reason for correcting this admission" required>
+            <BaseTextarea v-model="correctionReason" rows="3" placeholder="Document how the attending doctor was verified" :disabled="doctorCorrectionSaving" />
+          </FormField>
+          <BaseButton :disabled="!correctionDoctorId || correctionReason.trim().length < 10 || doctorCorrectionSaving" :loading="doctorCorrectionSaving" @click="saveDoctorCorrection">
+            Save attending doctor
+          </BaseButton>
+        </template>
+        <p v-if="doctorCorrectionError" class="text-sm text-red-700">{{ doctorCorrectionError }}</p>
+      </div>
+    </Modal>
   </div>
 </template>
 
@@ -387,7 +435,7 @@ import FormField from '../components/forms/FormField.vue'
 import StatCard from '../components/StatCard.vue'
 import Modal from '../components/Modal.vue'
 import { useEHR } from '../stores/ehr'
-import { apiGet } from '../services/api'
+import { apiGet, apiPut } from '../services/api'
 
 const Info = {
   props: ['label', 'value'],
@@ -405,6 +453,7 @@ const {
   addWard,
   assignBed,
   dischargeAdmission,
+  refresh,
 } = useEHR()
 
 const showWardForm = ref(false)
@@ -413,6 +462,21 @@ const patientSearch = ref('')
 const selectedPatient = ref('')
 type DoctorOption = { userId: number; fullName: string; designation: string | null }
 const doctorOptions = ref<DoctorOption[]>([])
+const doctorCorrectionTarget = ref<any>(null)
+const doctorCorrectionAdmission = ref<any>(null)
+const correctionDoctors = ref<DoctorOption[]>([])
+const correctionDoctorId = ref('')
+const correctionReason = ref('')
+const doctorCorrectionError = ref('')
+const doctorCorrectionLoading = ref(false)
+const doctorCorrectionSaving = ref(false)
+const canCorrectDoctor = (() => {
+  try {
+    return ['ADMIN', 'SYSTEM_ADMIN'].includes(String(JSON.parse(localStorage.getItem('ecis-user') || '{}').role || '').toUpperCase())
+  } catch {
+    return false
+  }
+})()
 const selectedDoctorId = ref('')
 const assignmentError = ref('')
 const assigning = ref(false)
@@ -548,6 +612,54 @@ async function openAssignment(
     } catch (error) {
       assignmentError.value = error instanceof Error ? error.message : 'Unable to load assigned doctors.'
     }
+  }
+}
+
+async function openDoctorCorrection(b: any) {
+  if (!b?.admissionId) return
+  doctorCorrectionTarget.value = b
+  doctorCorrectionAdmission.value = null
+  correctionDoctors.value = []
+  correctionDoctorId.value = ''
+  correctionReason.value = ''
+  doctorCorrectionError.value = ''
+  doctorCorrectionLoading.value = true
+  try {
+    const [admission, doctors] = await Promise.all([
+      apiGet<{ data?: any }>(`/admissions/${encodeURIComponent(b.admissionId)}`),
+      apiGet<{ data?: DoctorOption[] }>('/providers?role=DOCTOR'),
+    ])
+    if (!admission.data) throw new Error('Admission details are unavailable.')
+    doctorCorrectionAdmission.value = admission.data
+    correctionDoctors.value = doctors.data || []
+  } catch (error) {
+    doctorCorrectionError.value = error instanceof Error ? error.message : 'Unable to load attending doctors.'
+  } finally {
+    doctorCorrectionLoading.value = false
+  }
+}
+
+function closeDoctorCorrection() {
+  if (doctorCorrectionSaving.value) return
+  doctorCorrectionTarget.value = null
+}
+
+async function saveDoctorCorrection() {
+  const admissionId = doctorCorrectionTarget.value?.admissionId
+  if (!admissionId || !correctionDoctorId.value || correctionReason.value.trim().length < 10 || doctorCorrectionSaving.value) return
+  doctorCorrectionSaving.value = true
+  doctorCorrectionError.value = ''
+  try {
+    await apiPut(`/admissions/${encodeURIComponent(admissionId)}/attending-doctor`, {
+      doctorId: Number(correctionDoctorId.value),
+      reason: correctionReason.value.trim(),
+    })
+    await refresh()
+    doctorCorrectionTarget.value = null
+  } catch (error) {
+    doctorCorrectionError.value = error instanceof Error ? error.message : 'Unable to assign the attending doctor.'
+  } finally {
+    doctorCorrectionSaving.value = false
   }
 }
 

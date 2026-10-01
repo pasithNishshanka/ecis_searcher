@@ -991,6 +991,8 @@ async function getAllPatients(
 async function searchPatients(
   hospitalId,
   searchTerm,
+  gender = null,
+  page = 1,
 ) {
   const term =
     `%${String(
@@ -998,11 +1000,9 @@ async function searchPatients(
     ).trim()}%`;
 
 
-  const result =
-    await pool.query(
-      `
-        ${patientSelect}
-
+  const pageSize = 50;
+  const offset = (page - 1) * pageSize;
+  const searchSql = `
         FROM public.patients p
 
         JOIN public.hospitals h
@@ -1024,6 +1024,8 @@ async function searchPatients(
 
             OR p.last_name ILIKE $2
 
+            OR CONCAT_WS(' ', p.first_name, p.middle_name, p.last_name) ILIKE $2
+
             OR p.nic_number ILIKE $2
 
             OR p.primary_phone ILIKE $2
@@ -1035,22 +1037,29 @@ async function searchPatients(
             OR p.province ILIKE $2
           )
 
+          AND ($3::TEXT IS NULL OR p.gender = $3)
+  `;
+  const params = [Number(hospitalId), term, gender];
+  const [countResult, result] = await Promise.all([
+    pool.query(`SELECT COUNT(DISTINCT p.patient_id)::int AS total ${searchSql}`, params),
+    pool.query(`
+        ${patientSelect}
+        ${searchSql}
         ORDER BY
           p.first_name,
-          p.last_name
+          p.last_name,
+          p.patient_id
 
-        LIMIT 50;
-      `,
-      [
-        Number(
-          hospitalId,
-        ),
-        term,
-      ],
-    );
+        LIMIT $4 OFFSET $5;
+      `, [...params, pageSize, offset]),
+  ]);
 
-
-  return result.rows;
+  return {
+    rows: result.rows,
+    total: Number(countResult.rows[0]?.total || 0),
+    page,
+    pageSize,
+  };
 }
 
 

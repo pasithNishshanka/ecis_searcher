@@ -7,6 +7,7 @@ const {
   getPatientAdmissions,
   getAdmissionById,
   dischargeAdmission,
+  assignAttendingDoctor,
 } = require("../controllers/admission.controller");
 
 const router = express.Router();
@@ -53,6 +54,12 @@ router.post(
   "/:admissionId/discharge",
   authorizeRoles("DOCTOR", "ADMIN"),
   dischargeAdmission,
+);
+
+router.put(
+  "/:admissionId/attending-doctor",
+  authorizeRoles("ADMIN", "SYSTEM_ADMIN"),
+  assignAttendingDoctor,
 );
 
 router.get(

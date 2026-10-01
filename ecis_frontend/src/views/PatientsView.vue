@@ -48,6 +48,7 @@
           </option>
         </BaseSelect>
       </div>
+      <p v-if="searchError" class="mt-3 text-sm text-red-700">{{ searchError }}</p>
     </section>
 
 
@@ -66,7 +67,7 @@
             </h2>
 
             <p class="muted mt-1">
-              {{ filtered.length }}
+              {{ searchActive ? `${filtered.length} of ${searchTotal}` : filtered.length }}
               patient records
             </p>
           </div>
@@ -248,7 +249,7 @@
                 class="p-12 text-center text-sm text-slate-400"
               >
                 {{
-                  loading
+                  loading || searchLoading
                     ? "Loading registered patients..."
                     : "No patients found."
                 }}
@@ -256,6 +257,11 @@
             </tr>
           </tbody>
         </table>
+      </div>
+      <div v-if="searchActive && searchHasMore" class="border-t p-4 text-center">
+        <BaseButton variant="secondary" :disabled="searchLoading" @click="loadMorePatients">
+          {{ searchLoading ? "Loading..." : "Load more patients" }}
+        </BaseButton>
       </div>
     </section>
 
@@ -793,6 +799,7 @@ import FaceCapture from "../components/FaceCapture.vue";
 import { FACE_MODEL_ID } from "../services/faceRecognition";
 
 import {
+  mapPatient,
   useEHR,
 } from "../stores/ehr";
 
@@ -869,6 +876,7 @@ async function registerExisting(candidate: CentralPatient) {
   try {
     await apiPost(`/patients/${candidate.patient_id}/register-at-current-hospital`, {});
     await refresh();
+    refreshPatientSearch();
     openCentral.value = false;
     centralResults.value = [];
     centralSearched.value = false;
@@ -889,6 +897,70 @@ const search =
 
 const genderFilter =
   ref("");
+
+const searchResults = ref<ReturnType<typeof mapPatient>[]>([]);
+const searchLoading = ref(false);
+const searchError = ref("");
+const searchTotal = ref(0);
+const searchPage = ref(1);
+const searchHasMore = ref(false);
+const searchActive = computed(() => Boolean(search.value.trim() || genderFilter.value));
+let searchRequestVersion = 0;
+
+async function loadPatientSearch(version: number, page = 1) {
+  const query = search.value.trim();
+  const gender = genderFilter.value;
+  searchLoading.value = true;
+  searchError.value = "";
+  try {
+    const params = new URLSearchParams();
+    if (query) params.set("q", query);
+    if (gender) params.set("gender", gender);
+    params.set("page", String(page));
+    const response = await apiGet<{ data?: unknown[]; total?: number; hasMore?: boolean }>(`/patients/search?${params}`);
+    if (version === searchRequestVersion) {
+      const mapped = (response.data || []).map(mapPatient);
+      searchResults.value = page === 1 ? mapped : [...searchResults.value, ...mapped];
+      searchTotal.value = Number(response.total ?? searchResults.value.length);
+      searchPage.value = page;
+      searchHasMore.value = Boolean(response.hasMore);
+    }
+  } catch (cause) {
+    if (version === searchRequestVersion) {
+      if (page === 1) searchResults.value = [];
+      searchError.value = cause instanceof Error ? cause.message : "Patient search failed.";
+    }
+  } finally {
+    if (version === searchRequestVersion) searchLoading.value = false;
+  }
+}
+
+function loadMorePatients() {
+  if (searchLoading.value || !searchHasMore.value) return;
+  void loadPatientSearch(searchRequestVersion, searchPage.value + 1);
+}
+
+function refreshPatientSearch() {
+  if (!search.value.trim() && !genderFilter.value) return;
+  void loadPatientSearch(++searchRequestVersion);
+}
+
+watch([search, genderFilter], (_values, _oldValues, onCleanup) => {
+  const version = ++searchRequestVersion;
+  searchResults.value = [];
+  searchTotal.value = 0;
+  searchPage.value = 1;
+  searchHasMore.value = false;
+  if (!search.value.trim() && !genderFilter.value) {
+    searchResults.value = [];
+    searchLoading.value = false;
+    searchError.value = "";
+    return;
+  }
+  searchLoading.value = true;
+  const timer = setTimeout(() => void loadPatientSearch(version), 250);
+  onCleanup(() => clearTimeout(timer));
+});
 
 const openRegister =
   ref(false);
@@ -1074,41 +1146,9 @@ const availableDistricts =
 
 const filtered =
   computed(() => {
-    const q =
-      search.value
-        .trim()
-        .toLowerCase();
-
-    return patients.value.filter(
-      (patient) => {
-        const matchesText =
-          !q ||
-          [
-            patient.firstName,
-            patient.lastName,
-            patient.patientNumber,
-            patient.nic,
-            patient.phone,
-            patient.address,
-            patient.district,
-            patient.province,
-          ]
-            .filter(Boolean)
-            .join(" ")
-            .toLowerCase()
-            .includes(q);
-
-        const matchesGender =
-          !genderFilter.value ||
-          patient.gender ===
-            genderFilter.value;
-
-        return (
-          matchesText &&
-          matchesGender
-        );
-      },
-    );
+    return search.value.trim() || genderFilter.value
+      ? searchResults.value
+      : patients.value;
   });
 
 
@@ -1629,6 +1669,7 @@ async function savePatient() {
     closeModal();
 
     resetForm();
+    refreshPatientSearch();
 
     if (attachmentErrors.length) {
       showToast("Patient saved; photo or face clue needs attention", attachmentErrors.join(" "), "error");

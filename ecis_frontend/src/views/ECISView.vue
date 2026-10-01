@@ -740,14 +740,16 @@
                   <p
                     class="text-3xl font-black text-teal-700"
                   >
-                    <template v-if="candidate.faceDistance !== undefined && !candidate.score">Face clue</template>
+                    <template v-if="candidate.faceDistance !== undefined && !hasClinicalEvidence(candidate)">Face clue</template>
                     <template v-else>{{ scorePercent(candidate.score) }}%</template>
                   </p>
 
                   <p
                     class="text-[10px] font-bold uppercase text-slate-400"
                   >
-                    {{ candidate.faceDistance !== undefined ? "clinical evidence" : "match score" }}
+                    {{ candidate.faceDistance !== undefined && !hasClinicalEvidence(candidate)
+                      ? "Needs clinical review"
+                      : "Heuristic evidence score" }}
                   </p>
                 </div>
 
@@ -1464,32 +1466,10 @@ const availableDistricts =
 
 const sorted =
   computed(() => {
-    return [
-      ...results.value,
-    ].sort(
-      (
-        a,
-        b,
-      ) => {
-        if (
-          sort.value ===
-          "name"
-        ) {
-          return String(
-            a.name || "",
-          ).localeCompare(
-            String(
-              b.name || "",
-            ),
-          );
-        }
-
-
-        if (a.faceDistance !== undefined && b.faceDistance !== undefined) {
-          return a.faceDistance - b.faceDistance || (Number(b.score) || 0) - (Number(a.score) || 0);
-        }
-        return (Number(b.score) || 0) - (Number(a.score) || 0);
-      },
+    // The backend owns evidence scoring and ranking. Name is only a display sort.
+    if (sort.value !== "name") return results.value;
+    return [...results.value].sort((a, b) =>
+      String(a.name || "").localeCompare(String(b.name || "")),
     );
   });
 
@@ -2325,6 +2305,10 @@ function lastInitial(
 /* ============================================================
    SCORE DISPLAY
    ============================================================ */
+
+function hasClinicalEvidence(candidate: BackendCandidate) {
+  return candidate.evidence?.some((item) => item.key !== "face") || false;
+}
 
 function scorePercent(
   score: number,

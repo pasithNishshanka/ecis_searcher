@@ -578,10 +578,38 @@ async function getAdmissionById(
 }
 
 
+async function assignAttendingDoctor(req, res, next) {
+  try {
+    const hospitalId = getAuthenticatedHospitalId(req);
+    const actorUserId = getAuthenticatedUserId(req);
+    const admissionId = parsePositiveInteger(req.params.admissionId);
+    const doctorId = parsePositiveInteger(req.body?.doctorId);
+    if (!hospitalId || !actorUserId) {
+      return res.status(401).json({ success: false, message: "Authenticated hospital information is missing." });
+    }
+    if (!admissionId || !doctorId) {
+      return res.status(400).json({ success: false, message: "A valid admission and attending doctor are required." });
+    }
+    if (String(req.body?.reason || "").trim().length < 10) {
+      return res.status(400).json({ success: false, message: "Explain the correction in at least 10 characters." });
+    }
+    const admission = await admissionService.assignAttendingDoctor({
+      hospitalId, admissionId, doctorId, actorUserId, reason: req.body.reason,
+    });
+    return res.status(200).json({ success: true, data: admission });
+  } catch (error) {
+    if (/Active admission not found|already recorded|Select an active attending doctor/.test(error.message || "")) {
+      return sendAdmissionConflict(res, error);
+    }
+    next(error);
+  }
+}
+
 module.exports = {
   createAdmission,
   createEmergencyAdmission,
   getPatientAdmissions,
   getAdmissionById,
   dischargeAdmission,
+  assignAttendingDoctor,
 };

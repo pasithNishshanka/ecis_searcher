@@ -2,6 +2,35 @@ const ecisService = require("../services/ecis.service");
 const pool = require("../config/database");
 const faceProfiles = require("../services/faceProfile.service");
 
+const SEARCH_CLUE_FIELDS = [
+  "patientNumber", "name", "nic", "phone", "gender", "bloodGroup",
+  "occupation", "district", "province", "surgery", "fracture",
+  "device", "dental", "observation", "treatment", "investigation",
+  "ageMin", "ageMax", "heightMin", "heightMax", "weightMin", "weightMax",
+];
+const FACE_MAX_SCORE = 20;
+
+function hasClinicalClue(criteria) {
+  return SEARCH_CLUE_FIELDS.some((field) => {
+    const value = criteria[field];
+    return value !== undefined && value !== null && String(value).trim() !== "";
+  });
+}
+
+function faceEvidence(match) {
+  const distance = Number(match.distance);
+  const safeDistance = Math.max(0, Math.min(faceProfiles.MAX_DISTANCE, distance));
+  const score = Math.max(1, Math.round(FACE_MAX_SCORE * (1 - safeDistance / faceProfiles.MAX_DISTANCE)));
+  const strength = safeDistance <= 0.4 ? "Strong" : safeDistance <= 0.48 ? "Moderate" : "Possible";
+  return {
+    type: `${strength} face evidence`,
+    description: "Biometric clue only. Review clinical evidence before confirming identity.",
+    sourceTable: "patient_face_profiles",
+    key: "face",
+    score,
+  };
+}
+
 
 /*
  * ============================================================
@@ -384,6 +413,13 @@ const searchECISCandidates = async (
             "ECIS case-linked search is only available for unidentified emergency cases",
         });
       }
+
+      if (emergencyCase.status === "DISCHARGED") {
+        return res.status(400).json({
+          success: false,
+          message: "ECIS case-linked search is unavailable for a discharged emergency case",
+        });
+      }
     }
 
 
@@ -400,12 +436,13 @@ const searchECISCandidates = async (
       faceDescriptor,
       faceModelId,
       facePatientIds: _ignoredFacePatientIds,
+      relaxedFilters: _ignoredRelaxedFilters,
       ...directCriteria
     } = criteria;
 
     const faceSearch = faceDescriptor !== undefined;
     const faceMatches = faceSearch
-      ? await faceProfiles.findMatches(faceDescriptor, faceModelId)
+      ? await faceProfiles.findMatches(faceDescriptor, faceModelId, emergencyCaseId ? null : hospitalId)
       : [];
 
 
@@ -413,10 +450,13 @@ const searchECISCandidates = async (
       normalizeFrontendCriteria(
         directCriteria,
       );
+    const clinicalSearch = hasClinicalClue(serviceCriteria);
 
-    if (faceSearch && faceMatches.length) {
-      // Only server-computed candidate IDs can constrain the clinical search.
-      serviceCriteria.facePatientIds = faceMatches.map((match) => match.patientId);
+    if (!faceSearch && !clinicalSearch) {
+      return res.status(400).json({
+        success: false,
+        message: "Enter at least one search clue.",
+      });
     }
 
 
@@ -434,9 +474,22 @@ const searchECISCandidates = async (
     }
 
 
-    const serviceResult = faceSearch && !faceMatches.length
-      ? { candidates: [], weightModel: null }
-      : await ecisService.searchPatients(serviceCriteria, hospitalId);
+    // Normal clinical search never depends on a facial threshold. Separately
+    // score server-computed face candidates against all supplied clues without
+    // making every clue a SQL requirement. Merge the two result sets below.
+    const clinicalResult = clinicalSearch
+      ? await ecisService.searchPatients(serviceCriteria, hospitalId, {
+          allowCrossHospital: Boolean(emergencyCaseId),
+        })
+      : null;
+    const faceResult = faceMatches.length
+      ? await ecisService.searchPatients(serviceCriteria, hospitalId, {
+          facePatientIds: faceMatches.map((match) => match.patientId),
+          relaxedFilters: true,
+          allowCrossHospital: Boolean(emergencyCaseId),
+        })
+      : null;
+    const serviceResult = clinicalResult || faceResult;
 
 
     /*
@@ -451,22 +504,19 @@ const searchECISCandidates = async (
      *
      * Keep the controller compatible with that structure.
      */
-    const rawCandidates =
-      Array.isArray(
-        serviceResult,
-      )
-        ? serviceResult
-        : Array.isArray(
-            serviceResult?.candidates,
-          )
-          ? serviceResult.candidates
-          : [];
-
-
-    const candidates =
-      rawCandidates.map(
-        mapCandidate,
-      );
+    const byId = new Map();
+    for (const result of [clinicalResult, faceResult]) {
+      const rows = Array.isArray(result) ? result : result?.candidates || [];
+      for (const raw of rows) {
+        const mapped = mapCandidate(raw);
+        const id = Number(mapped.patientId);
+        if (!Number.isSafeInteger(id) || id <= 0) continue;
+        if (!byId.has(id) || mapped.rawScore > byId.get(id).rawScore) {
+          byId.set(id, mapped);
+        }
+      }
+    }
+    const candidates = [...byId.values()];
 
     if (faceSearch) {
       const byPatient = new Map(faceMatches.map((match) => [match.patientId, match]));
@@ -474,17 +524,23 @@ const searchECISCandidates = async (
         const match = byPatient.get(Number(candidate.patientId));
         if (match) {
           candidate.faceDistance = Number(match.distance.toFixed(3));
-          candidate.evidence.unshift({
-            type: "Possible face match",
-            description: "Biometric clue only. Review clinical evidence before confirming identity.",
-            sourceTable: "patient_face_profiles",
-            key: "face",
-            score: 0,
-          });
+          const evidence = faceEvidence(match);
+          candidate.evidence.unshift(evidence);
+          candidate.rawScore += evidence.score;
         }
+        const roundedScore = Math.round(
+          (candidate.rawScore / (ecisService.MAX_SCORE + FACE_MAX_SCORE)) * 100,
+        );
+        candidate.score = candidate.rawScore > 0
+          ? Math.max(1, Math.min(100, roundedScore))
+          : 0;
       }
-      candidates.sort((a, b) => a.faceDistance - b.faceDistance || b.rawScore - a.rawScore);
     }
+    candidates.sort((a, b) =>
+      b.rawScore - a.rawScore ||
+      (a.faceDistance ?? Infinity) - (b.faceDistance ?? Infinity) ||
+      String(a.patientNumber || "").localeCompare(String(b.patientNumber || "")),
+    );
 
 
     /*
@@ -556,8 +612,15 @@ const searchECISCandidates = async (
         candidates.length,
 
       weightModel:
-        serviceResult?.weightModel ||
-        null,
+        serviceResult?.weightModel
+          ? faceSearch
+            ? {
+                ...serviceResult.weightModel,
+                face: FACE_MAX_SCORE,
+                maximumScore: ecisService.MAX_SCORE + FACE_MAX_SCORE,
+              }
+            : serviceResult.weightModel
+          : null,
 
       candidates,
     });

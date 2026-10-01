@@ -417,9 +417,7 @@
                   "
                 >
                   {{
-                    formatStatus(
-                      order.order_status,
-                    )
+                    formatOrderStatus(order)
                   }}
                 </span>
 
@@ -1215,9 +1213,7 @@
             <InfoBox
               label="Status"
               :value="
-                formatStatus(
-                  selectedOrderForDispense.order_status,
-                )
+                formatOrderStatus(selectedOrderForDispense)
               "
             />
 
@@ -1954,6 +1950,13 @@ function formatStatus(
       ) =>
         character.toUpperCase(),
     );
+}
+
+function formatOrderStatus(order: any): string {
+  if (order?.order_status === "COMPLETED" && Number(order.total_dispensed_quantity || 0) <= 0) {
+    return "Completed · dispensing not recorded";
+  }
+  return formatStatus(order?.order_status);
 }
 
 

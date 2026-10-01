@@ -266,7 +266,7 @@ async function status({ patientId, hospitalId }) {
   return { enrolled: Boolean(result.rowCount), updatedAt: result.rows[0]?.updated_at || null };
 }
 
-async function findMatches(descriptor, modelId) {
+async function findMatches(descriptor, modelId, hospitalId = null) {
   const key = encryptionKey();
   validateDescriptor(descriptor, modelId);
   await ensureSchema();
@@ -275,7 +275,13 @@ async function findMatches(descriptor, modelId) {
     FROM public.patient_face_profiles fp
     JOIN public.patients p ON p.patient_id = fp.patient_id
     WHERE p.status = 'ACTIVE' AND fp.model_id = $1
-  `, [MODEL_ID]);
+      AND ($2::BIGINT IS NULL OR EXISTS (
+        SELECT 1 FROM public.patient_hospital_registrations phr
+        WHERE phr.patient_id = p.patient_id
+          AND phr.hospital_id = $2
+          AND phr.status = 'ACTIVE'
+      ))
+  `, [MODEL_ID, hospitalId]);
   const matches = [];
   for (const row of result.rows) {
     // A corrupt template must not silently become a weak match.

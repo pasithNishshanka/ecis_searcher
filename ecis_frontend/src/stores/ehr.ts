@@ -133,7 +133,7 @@ function responseArray(
    MAP PATIENT
    ============================================================ */
 
-function mapPatient(
+export function mapPatient(
   row: any,
 ): Patient {
   const allergies =

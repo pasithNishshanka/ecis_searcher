@@ -1,6 +1,8 @@
 const express =
   require("express");
 
+const pool = require("./config/database");
+
 const cors =
   require("cors");
 
@@ -181,19 +183,18 @@ app.use(
 
 app.get(
   "/api/health",
-  (
+  async (
     req,
     res,
   ) => {
-    res.status(
-      200,
-    ).json({
-      success:
-        true,
-
-      message:
-        "ECIS backend is running",
-    });
+    res.set("Cache-Control", "no-store");
+    try {
+      await pool.query("SELECT 1");
+      return res.status(200).json({ success: true, message: "ECIS backend and database are available" });
+    } catch (error) {
+      console.error("ECIS health check failed:", error.message);
+      return res.status(503).json({ success: false, message: "ECIS database is unavailable" });
+    }
   },
 );
 

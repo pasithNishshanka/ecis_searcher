@@ -89,9 +89,14 @@
           class="flex items-center gap-3"
         >
           <span
-            class="hidden rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700 sm:inline"
+            class="hidden rounded-full px-3 py-1.5 text-xs font-bold sm:inline"
+            :class="systemStatus === 'online'
+              ? 'bg-emerald-50 text-emerald-700'
+              : systemStatus === 'offline'
+                ? 'bg-red-50 text-red-700'
+                : 'bg-slate-100 text-slate-600'"
           >
-            ● System online
+            ● {{ systemStatus === 'online' ? 'System online' : systemStatus === 'offline' ? 'System unavailable' : 'Checking system' }}
           </span>
 
           <div class="avatar">
@@ -168,7 +173,8 @@
 
 
 <script setup lang="ts">
-import { ref } from "vue";
+import { onMounted, onUnmounted, ref } from "vue";
+import { API_BASE_URL } from "../services/api";
 import {
   BedDouble,
   ClipboardList,
@@ -289,6 +295,31 @@ const nav = [
 
 
 const mobileMenuOpen = ref(false);
+
+const systemStatus = ref<"checking" | "online" | "offline">("checking");
+let healthTimer: ReturnType<typeof setInterval> | undefined;
+
+async function checkSystemHealth() {
+  try {
+    const response = await fetch(`${API_BASE_URL}/health`, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(5000),
+    });
+    const body = response.ok ? await response.json() : null;
+    systemStatus.value = response.ok && body?.success === true ? "online" : "offline";
+  } catch {
+    systemStatus.value = "offline";
+  }
+}
+
+onMounted(() => {
+  void checkSystemHealth();
+  healthTimer = setInterval(() => void checkSystemHealth(), 30000);
+});
+
+onUnmounted(() => {
+  if (healthTimer) clearInterval(healthTimer);
+});
 
 const mobileNav = nav.filter((item) =>
   ["/dashboard", "/patients", "/opd", "/pharmacy"].includes(item.path),

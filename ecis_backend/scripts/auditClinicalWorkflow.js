@@ -5,6 +5,7 @@ const countTables = [
   "admissions", "bht_entries", "investigations", "radiology_images",
   "medication_orders", "medication_dispensations", "surgeries", "procedures",
   "fractures", "dental_records", "medical_devices", "treatment_records",
+  "patient_identity_photos", "patient_face_profiles",
 ];
 
 async function main() {
@@ -54,6 +55,24 @@ async function main() {
   `);
 
   const admissionIntegrity = { ...integrity.rows[0], ...duplicates.rows[0] };
+  const medicationIntegrity = await pool.query(`
+    SELECT count(*) FILTER (WHERE order_status = 'COMPLETED' AND NOT EXISTS (
+      SELECT 1 FROM public.medication_dispensations d
+      WHERE d.medication_order_id = o.medication_order_id
+    ))::int AS completed_without_dispensation,
+    count(*) FILTER (WHERE order_status = 'ORDERED')::int AS pending_orders
+    FROM public.medication_orders o;
+  `);
+  const imagingCoverage = await pool.query(`
+    SELECT count(*)::int AS imaging_investigations,
+      count(*) FILTER (WHERE EXISTS (
+        SELECT 1 FROM public.radiology_images image
+        WHERE image.investigation_id = investigation.investigation_id
+          AND image.is_active = TRUE
+      ))::int AS investigations_with_stored_images
+    FROM public.investigations investigation
+    WHERE investigation.investigation_type = 'IMAGING';
+  `);
   const hardChecks = [
     "active_bed_not_occupied", "active_encounter_invalid_status",
     "discharged_encounter_not_completed", "patients_with_multiple_active_admissions",
@@ -65,6 +84,18 @@ async function main() {
   if (admissionIntegrity.active_without_bht > 0) warnings.push("Some active admissions have no BHT entry.");
   if (counts.radiology_images === 0) warnings.push("No radiology images are stored, although imaging investigations may exist.");
   if (counts.medication_dispensations === 0) warnings.push("No medication dispensations are recorded.");
+  if (medicationIntegrity.rows[0].completed_without_dispensation > 0) {
+    warnings.push("Completed medication orders without dispensing records need source verification; do not infer that medication was supplied.");
+  }
+  if (counts.patient_face_profiles < counts.patients) {
+    warnings.push("Face search covers only patients with an enrolled face profile; absence of a profile is not a mismatch.");
+  }
+  if (counts.patient_identity_photos < counts.patients) {
+    warnings.push("Some patients have no stored registration photo; do not imply that a photo was captured.");
+  }
+  if (imagingCoverage.rows[0].investigations_with_stored_images < imagingCoverage.rows[0].imaging_investigations) {
+    warnings.push("Some imaging investigations have no image stored in ECIS; check the source system before treating them as missing clinical imaging.");
+  }
   for (const hospital of hospitals.rows) {
     if (hospital.registered_patients > 0 && hospital.active_doctors === 0) {
       warnings.push(`Hospital ${hospital.hospital_id} has registered patients but no active doctor assignment.`);
@@ -75,6 +106,8 @@ async function main() {
     checkedAt: new Date().toISOString(),
     recordCounts: counts,
     admissionIntegrity,
+    medicationIntegrity: medicationIntegrity.rows[0],
+    imagingCoverage: imagingCoverage.rows[0],
     hospitalCoverage: hospitals.rows,
     warnings,
     failures,

@@ -1298,10 +1298,55 @@ async function getAdmissionById(hospitalId, admissionId) {
   return result.rows[0] || null;
 }
 
+async function assignAttendingDoctor({ hospitalId, admissionId, doctorId, actorUserId, reason }) {
+  const hospital = positiveInteger(hospitalId, "hospitalId");
+  const admission = positiveInteger(admissionId, "admissionId");
+  const doctor = positiveInteger(doctorId, "doctorId");
+  const actor = positiveInteger(actorUserId, "actorUserId");
+  const correctionReason = String(reason || "").trim();
+  if (correctionReason.length < 10) {
+    throw new Error("Record a reason of at least 10 characters for the attending doctor correction.");
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const current = await client.query(`
+      SELECT a.admission_id, a.attending_doctor_id
+      FROM public.admissions a
+      JOIN public.wards w ON w.ward_id = a.ward_id
+      WHERE a.admission_id = $1 AND w.hospital_id = $2 AND a.status = 'ADMITTED'
+      FOR UPDATE OF a;
+    `, [admission, hospital]);
+    if (!current.rowCount) throw new Error("Active admission not found for this hospital.");
+    if (current.rows[0].attending_doctor_id != null) {
+      throw new Error("An attending doctor is already recorded; this correction cannot overwrite it.");
+    }
+    await validateAttendingDoctor(client, doctor, hospital);
+    await client.query(`
+      UPDATE public.admissions SET attending_doctor_id = $2
+      WHERE admission_id = $1 AND attending_doctor_id IS NULL;
+    `, [admission, doctor]);
+    await client.query(`
+      INSERT INTO public.audit_logs
+        (hospital_id, user_id, action_type, entity_type, entity_id, new_values)
+      VALUES ($1, $2, 'ADMISSION_ATTENDING_DOCTOR_ASSIGNED', 'admission', $3, $4::jsonb);
+    `, [hospital, actor, admission, JSON.stringify({ doctorId: doctor, reason: correctionReason })]);
+    await client.query("COMMIT");
+    return getAdmissionById(hospital, admission);
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 module.exports = {
   createAdmission,
   createEmergencyAdmission,
   getPatientAdmissions,
   getAdmissionById,
   dischargeAdmission,
+  assignAttendingDoctor,
 };
